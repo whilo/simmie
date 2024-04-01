@@ -41,7 +41,8 @@
   (let [p (pub in (fn [{:keys [type]}]
                     (or ({:ie.simm.languages.gen-ai/cheap-llm ::gpt-35-turbo
                           :ie.simm.languages.gen-ai/reasoner-llm ::gpt-4-1106-preview
-                          :ie.simm.languages.gen-ai/tts-basic ::whisper-1} type)
+                          :ie.simm.languages.gen-ai/tts-basic ::whisper-1
+                          :ie.simm.languages.gen-ai/image-gen ::dall-e-2} type)
                         :unrelated)))
         gpt-35-turbo (chan)
         _ (sub p ::gpt-35-turbo gpt-35-turbo)
@@ -51,6 +52,9 @@
 
         whisper-1 (chan)
         _ (sub p ::whisper-1 whisper-1)
+
+        dall-e-2 (chan)
+        _ (sub p ::dall-e-2 dall-e-2)
 
         next-in (chan)
         _ (sub p :unrelated next-in)]
@@ -76,5 +80,12 @@
                                       :type :ie.simm.languages.gen-ai/tts-basic-reply
                                       :response (tts "whisper-1" m)))
                    (recur (<? S whisper-1))))
+
+    (go-loop-try S [{[m] :args :as s} (<? S dall-e-2)]
+                 (when s
+                   (put? S out (assoc s
+                                      :type :ie.simm.languages.gen-ai/image-gen-reply
+                                      :response (image-gen "dall-e-2" m)))
+                   (recur (<? S dall-e-2))))
 
     [S peer [next-in out]]))

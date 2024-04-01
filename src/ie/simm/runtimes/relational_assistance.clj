@@ -10,7 +10,7 @@
             [ie.simm.prompts :as pr]
             [superv.async :refer [<?? go-try S go-loop-try <? >? put?]]
             [clojure.core.async :refer [chan pub sub mult tap]]
-            [taoensso.timbre :refer [debug]]
+            [taoensso.timbre :refer [debug info warn error]]
             [datahike.api :as d]
             [clojure.string :as str]
             [clojure.java.io :as io]))
@@ -31,10 +31,11 @@
                 conn)
               (catch Exception _
                 (d/connect cfg)))]
+        (d/transact conn default-schema)
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
-(defn conversation [conn chat-id]
+(defn conversation [conn chat-id window-size]
   (->>
    (d/q '[:find ?d ?f ?l ?n ?t
           :in $ ?chat
@@ -49,16 +50,16 @@
           [(get-else $ ?u :from/last_name "") ?l]]
         @conn chat-id)
    (sort-by first)
-   (take-last 20)
+   (take-last window-size)
    (map (fn [[d f l n t]] (str d " " f " " l " (" n "): " t)))
    (str/join "\n")))
 
 (defn extract-tags [text]
-  (map second (re-seq #"\[\[([^\[\]]+)\]\]" text)))
+  (mapv second (re-seq #"\[\[([^\[\]]+)\]\]" text)))
 
 (defn msg->txs [message]
   (let [{:keys [message_id from chat date text]} message
-        tags (extract-tags text)]
+        tags (when text (extract-tags text))]
     [(let [{:keys [id is_bot first_name last_name username language_code]} from]
        (merge
         {:from/id (long id)
@@ -87,10 +88,11 @@
       {:message/id (long message_id)
        :message/from [:from/id (long (:id from))]
        :message/chat [:chat/id (long (:id chat))]
-       :message/date (java.util.Date. (long (* 1000 date)))
-       :message/text text}
+       :message/date (java.util.Date. (long (* 1000 date)))}
+      (when text
+        {:message/text text})
       (when (seq tags)
-        {:message/tags tags}))]))
+        {:message/tag tags}))]))
 
 (defn relational-assistance
   "This interpreter can derive facts and effects through a relational database."
@@ -114,40 +116,93 @@
         _ (tap mo out)
         pub-out (chan)
         _ (tap mo pub-out)
-        po (pub pub-out :type)]
+        po (pub pub-out :type)
+        
+        active-tags (atom nil)]
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]
                  (when m
                    (binding [lb/*chans* [next-in pi out po]]
                      (let [{:keys [msg]
-                            {:keys [text chat]} :msg} m
+                            {:keys [text chat voice-path]} :msg} m
                            _ (debug "received message" m)
+                           text (if-not voice-path text
+                                        (let [transcript (<? S (tts-basic voice-path))]
+                                          (when text (warn "Ignoring text in favor of voice message"))
+                                          (debug "created transcript" transcript)
+                                          (<? S (send-text! (:id chat) transcript))
+                                          transcript))
+                           msg (assoc msg :text text)
+
                            conn (ensure-conn peer (:id chat))
                            _ (debug "conn" conn)
+
                            ;; 1. add new facts from messages
                            _ (d/transact conn (msg->txs msg))
                            _ (debug "transacted")
-                           conv (conversation conn (:id chat))
-                           #_ (debug "conversation" conv)
-                           ;; 2. derive reply
-                           reply (<? S (cheap-llm (format pr/assistance-prompt conv)))
-                           _ (debug "reply" reply)
-                           reply (if-let [terms (second (re-find #"WEBSEARCH\('(.*)'\)" reply))]
-                                   (do
-                                     (debug "conducting web search" terms)
-                                     (->> terms
-                                          search
-                                          (<? S)
-                                          extract-body
-                                          (<? S)
-                                          (format pr/summarization-prompt terms)
-                                          cheap-llm
-                                          (<? S)))
-                                   reply)
-                           reply-msg (<? S (send-text! (:id chat) reply))
-                           _ (debug "reply-msg" reply-msg)
-                           _ (d/transact conn (msg->txs (:result reply-msg)))]
-                       ))
+                           ;; 2. recent conversation
+                           window-size 20
+                           conv (conversation conn (:id chat) window-size)
+                           _ (debug "conversation" conv)
+                           _ (when (zero? (mod (d/q '[:find (count ?m) .
+                                                      :in $ ?cid
+                                                      :where
+                                                      [?m :message/chat ?c]
+                                                      [?c :chat/id ?cid]]
+                                                    @conn (:id chat))
+                                               window-size))
+                               (let [summarization  (<? S (reasoner-llm (format pr/summarization-prompt conv)))
+                                     messages (->> (d/q '[:find ?d ?e
+                                                          :in $ ?chat
+                                                          :where
+                                                          [?c :chat/id ?chat]
+                                                          [?e :message/chat ?c]
+                                                          [?e :message/date ?d]]
+                                                        @conn (:id chat))
+                                                   (sort-by first)
+                                                   (take-last window-size)
+                                                   (map second))]
+                                 (debug "messages" messages)
+                                 (debug "Summarization:" summarization)
+                                 (debug "with tags" (extract-tags summarization))
+                                 (reset! active-tags (extract-tags summarization))
+                                 (debug (d/transact conn [{:db/id -1
+                                                           :conversation/summary summarization
+                                                           :conversation/tag (extract-tags summarization)
+                                                           :conversation/message messages}]))))
+
+                           ;; 3. retrieve summaries for active tags
+                           summaries (d/q '[:find [?s ...]
+                                            :in $ [?t ...]
+                                            :where
+                                            [?c :conversation/tag ?t]
+                                            [?c :conversation/summary ?s]]
+                                          @conn (concat @active-tags (extract-tags conv)))
+                           _ (debug "active summaries" summaries @active-tags)
+                           _ (when (empty? @active-tags)
+                               (let [tags (d/q '[:find [?t ...] :where [_ :conversation/tag ?t]] @conn)
+                                     relevant (<? S (cheap-llm (format "You are given the following tags in brackets [[some tag]]:\n\n%s\n\nList the most relevant tags for the following conversation.\n\n%s"
+                                                                       (str/join ", " (map #(str "[[" % "]]") tags))
+                                                                       conv)))]
+                                 (debug "maybe relevant tags" relevant
+                                        (reset! active-tags (extract-tags relevant)))))
+
+                          ;; 2. derive reply
+                           reply (<? S (cheap-llm (format pr/assistance-prompt (str/join "\n\n" summaries) conv)))
+                           _ (debug "reply" reply)]
+                       (if (.contains reply "QUIET")
+                         (debug "No reply necessary")
+                         (let [reply (if-let [terms (second (re-find #"WEBSEARCH\('(.*)'\)" reply))]
+                                       (let [url (<? S (search terms))
+                                             body (<? S (extract-body url))
+                                             prompt (format pr/search-prompt terms body)
+                                             reply (<? S (cheap-llm prompt))]
+                                         (debug "conducting web search" terms)
+                                         (str reply "\n" url))
+                                       reply)
+                               reply-msg (<? S (send-text! (:id chat) reply))
+                               _ (debug "reply-msg" reply-msg)
+                               _ (d/transact conn (msg->txs (:result reply-msg)))]))))
                    (recur (<? S msg-ch))))
     ;; Note that we pass through the supervisor, peer and new channels for composition
     [S peer [next-in prev-out]]))

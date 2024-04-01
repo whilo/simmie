@@ -1,9 +1,8 @@
 (ns ie.simm.simmie
   (:require [taoensso.timbre :as log]
-            [kabel.peer :as peer]
-            [kabel.http-kit :as http-kit]
             [superv.async :refer [S <? <??]]
-            [ie.simm.towers :refer [default debug]])
+            [clojure.core.async :refer [chan close!]]
+            [ie.simm.towers :refer [default debug test-tower]])
   (:gen-class))
 
 
@@ -12,15 +11,66 @@
 (defn -main
   "Starting a peer server."
   [& _args]
-  (let [server-id #uuid "1eeb9d11-a927-4710-9a82-48a82fb0d7b1"
-        url "ws://localhost:47291"
-        http-handler (http-kit/create-http-kit-handler! S url server-id)
-        server (peer/server-peer S http-handler server-id
-                                ;; here you can plug in your (composition of) middleware(s)
-                                (default)
-                                ;; we chose no serialization (pr-str/read-string by default)
-                                identity
-                                ;; we could also pick the transit middleware
-                                #_transit)]
-    (<?? S (peer/start server))
-    (log/info "Server started.")))
+  (let [in (chan)
+        out (chan)
+        peer (atom {})
+        [_ _ [next-in prev-out]] ((default) [S peer [in out]]) ]
+    (log/info "Server started.")
+    ;; HACK to block
+    (<?? S (chan))))
+
+
+(comment
+
+  ;; pull above let into top level defs
+
+  (def in (chan))
+
+  (def out (chan))
+
+  (def peer (atom {}))
+
+  (def tower ((test-tower) [S peer [in out]]))
+
+  (close! in)
+
+  (require '[datahike.api :as d])
+
+  (def conn (second (first (:conn @peer))))
+
+  (d/q '[:find ?s
+         :in $ [?t ...]
+         :where
+         [?c :conversation/summary ?s]
+         [?c :conversation/tag ?t]]
+       @conn
+       ["agent-based modeling" "Vancouver Cherry Blossom Festival" "Vancouver International Children's Festival" "simmie_beta" "Vancouver"])
+
+  (d/q '[:find ?t . :where [?c :chat/id ?t]] @conn)
+
+  (d/q '[:find (count ?m) .
+         :in $ ?cid
+         :where
+         [?m :message/chat ?c]
+         [?c :chat/id ?cid]]
+       @conn 79524334)
+
+  (d/q '[:find (pull ?c [:*]) :where [?c :conversation/summary ?s]] @conn)
+
+
+  ;; inspect web hook
+
+  (require '[morse.api :as t]
+           '[ie.simm.config :refer [config]]
+           '[clj-http.client :as http])
+
+  (def base-url "https://api.telegram.org/bot")
+
+  (def token (:telegram-bot-token config))
+
+  (http/get (str base-url token "/getWebhookInfo"))
+
+  (t/set-webhook token "")
+
+
+  )

@@ -1,14 +1,15 @@
 # Simmie
 
-Simmie is a conversational AI framework that tries to blend in to human conversations as much as possible while doing useful background research and thinking ahead.
+Simmie is a conversational AI framework that tries to blend in to human conversations as much as possible while doing useful background research and thinking ahead. It is trying to simulate what you need to know or decide next.
 
 ## Installation
 
-TODO
+Make sure to define your credentials in `resources/config.edn`.
 
 ## Usage
 
-TODO
+Just start a REPL and explore the `towers` namespace.
+
 
 ## License
 

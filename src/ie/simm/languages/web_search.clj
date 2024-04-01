@@ -1,21 +1,10 @@
 (ns ie.simm.languages.web-search
-  (:require [ie.simm.languages.bindings :refer [*chans*]]
-            [clojure.core.async :refer [chan close! pub sub]]
-            [superv.async :refer [<?? go-try S go-loop-try <? >? put?]]
-            [hasch.core :refer [uuid]]))
+  (:require [ie.simm.languages.dispatch :refer [create-downstream-msg-handler]]))
 
-(defn search [terms]
-  (let [[in out] *chans*
-        req-id (uuid)
-        p (pub out (fn [{:keys [type request-id]}] [type request-id]))
-        reply (chan)
-        _ (sub p [::search-reply req-id] reply)]
-    (put? S in {:type ::search
-                :terms terms
-                :request-id req-id})
-    (go-try S (let [{:keys [url]} (<? S reply)]
-                (close! reply)
-                url))))
+(let [handler (create-downstream-msg-handler ::search)]
+  (defn search [terms]
+    (handler terms)))
+
 
 (comment
 

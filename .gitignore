@@ -27,4 +27,6 @@
 /classes
 /target
 
+databases/
+.clj-kondo/
 resources/config.edn

@@ -18,15 +18,18 @@
   (defn tts-basic [voice-path]
     (handler voice-path)))
 
-
-
+(let [handler (create-downstream-msg-handler ::image-gen)]
+  (defn image-gen [prompt]
+    (handler prompt)))
 
 (comment
 
- (require '[ie.simm.runtimes.openai :refer [openai]])
+  (require '[ie.simm.runtimes.openai :refer [openai]])
 
- (let [in (chan)
-       out (chan)]
-   (openai [S nil [in out]])
-   (binding [*chans* [in out]]
-     (<?? S (cheap-llm "What is the capital of Ireland?")))))
+;; TODO needs to use pub-sub
+  (let [in (chan)
+        out (chan)]
+    (openai [S nil [in out]])
+    (binding [*chans* [in out]]
+      (<?? S (cheap-llm "What is the capital of Ireland?"))))
+  )
