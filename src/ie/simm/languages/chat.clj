@@ -6,3 +6,7 @@
 (let [handler (create-upstream-msg-handler ::send-text)]
   (defn send-text! [chat-id msg]
     (handler chat-id msg)))
+
+(let [handler (create-upstream-msg-handler ::send-photo)]
+  (defn send-photo! [chat-id msg]
+    (handler chat-id msg)))

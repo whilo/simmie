@@ -37,6 +37,6 @@
                    (debug "searching brave for" s)
                    (put? S out (assoc s
                                       :type :ie.simm.languages.web-search/search-reply
-                                      :response (second-url (search-brave (first (:args s))))))
+                                      :response (try (second-url (search-brave (first (:args s)))) (catch Exception e e))))
                    (recur (<? S search))))
     [S peer [next-in out]]))

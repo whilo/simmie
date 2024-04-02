@@ -26,7 +26,7 @@
                  (when s
                    (put? S out (assoc s
                                       :type :ie.simm.languages.browser/extract-body-reply
-                                      :response (extract-body url)))
+                                      :response (try (extract-body url) (catch Exception e e))))
                    (recur (<? S get-body))))
 
     [S peer [next-in out]]))

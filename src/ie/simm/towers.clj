@@ -17,34 +17,34 @@
   [S peer [in out]])
 
 (defn default []
-  (comp drain brave etaoin openai relational-assistance telegram))
+  (comp drain brave etaoin openai relational-assistance telegram codrain))
 
 (defn debug [] 
   (comp drain 
-        (partial report #(println "drain: " %))
+        (partial report #(println "drain: " (:type %) (:request-id %)))
         brave
-        (partial report #(println "brave: " %))
+        (partial report #(println "brave: " (:type %) (:request-id %)))
         etaoin
-        (partial report #(println "etaoin: " %))
+        (partial report #(println "etaoin: " (:type %) (:request-id %)))
         openai
-        (partial report #(println "openai: " %))
+        (partial report #(println "openai: " (:type %) (:request-id %)))
         relational-assistance
-        (partial report #(println "relational-assistance: " %))
+        (partial report #(println "relational-assistance: " (:type %) (:request-id %)))
         telegram
-        (partial report #(println "telegram: " %))
+        (partial report #(println "telegram: " (:type %) (:request-id %)))
         codrain))
 
 (defn test-tower []
   (comp  drain
-         (partial report #(println "drain: " (:type %)))
+         (partial report #(println "drain: " (:type %) (:request-id %)))
          brave
-         (partial report #(println "brave: " (:type %)))
+         (partial report #(println "brave: " (:type %) (:request-id %)))
          etaoin
-         (partial report #(println "etaoin: " (:type %)))
+         (partial report #(println "etaoin: " (:type %) (:request-id %)))
          openai
-         (partial report #(println "openai: " (:type %)))
+         (partial report #(println "openai: " (:type %) (:request-id %)))
          relational-assistance
-         (partial report #(println "relational-assistance: " (:type %)))
+         (partial report #(println "relational-assistance: " (:type %) (:request-id %)))
          (partial telegram long-polling)
-         (partial report #(println "telegram: " (:type %)))
+         (partial report #(println "telegram: " (:type %) (:request-id %)))
          codrain))

@@ -39,7 +39,7 @@
 (defn server [in]
   (let [telegram-routes (routes
                          (POST "/telegram-callback" {body :body}
-                           (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper))
+                           (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)
                                  msg (fetch-voice! msg)
                                  m {:type ::message
                                     :request-id (uuid)
@@ -75,10 +75,14 @@
 
          prev-out (chan)
          po (pub prev-out (fn [{:keys [type]}]
-                            (or ({:ie.simm.languages.chat/send-text ::send-text} type)
+                            (or ({:ie.simm.languages.chat/send-text ::send-text
+                                  :ie.simm.languages.chat/send-photo ::send-photo} type)
                                 :unrelated)))
          send-text (chan)
          _ (sub po ::send-text send-text)
+         send-photo (chan)
+         _ (sub po ::send-photo send-photo)
+
          _ (sub po :unrelated out)]
         ;; this only triggers when in is closed and cleans up
      (go-try S
@@ -89,10 +93,18 @@
      (go-loop-try S [{[chat-id msg] :args :as m} (<? S send-text)]
                   (when m
                     (debug "sending telegram message:" chat-id msg)
-                    (put? S in (assoc m 
+                    (put? S in (assoc m
                                       :type :ie.simm.languages.chat/send-text-reply
                                       :response (t/send-text (:telegram-bot-token config) chat-id msg)))
                     (recur (<? S send-text))))
+
+     (go-loop-try S [{[chat-id url] :args :as m} (<? S send-photo)]
+                  (when m
+                    (debug "sending telegram photo:" chat-id url)
+                    (put? S in (assoc m
+                                      :type :ie.simm.languages.chat/send-photo-reply
+                                      :response (t/send-photo (:telegram-bot-token config) chat-id url)))
+                    (recur (<? S send-photo))))
      [S peer [next-in prev-out]])))
 
 (comment

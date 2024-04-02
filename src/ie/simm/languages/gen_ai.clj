@@ -14,8 +14,8 @@
   (defn reasoner-llm [msg]
     (handler msg)))
 
-(let [handler (create-downstream-msg-handler ::tts-basic)]
-  (defn tts-basic [voice-path]
+(let [handler (create-downstream-msg-handler ::stt-basic)]
+  (defn stt-basic [voice-path]
     (handler voice-path)))
 
 (let [handler (create-downstream-msg-handler ::image-gen)]
