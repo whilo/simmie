@@ -34,7 +34,7 @@
                 conn)
               (catch Exception _
                 (d/connect cfg)))]
-        (d/transact conn default-schema)
+        #_(d/transact conn default-schema)
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
@@ -63,39 +63,43 @@
 (defn msg->txs [message]
   (let [{:keys [message_id from chat date text]} message
         tags (when text (extract-tags text))]
-    [(let [{:keys [id is_bot first_name last_name username language_code]} from]
-       (merge
-        {:from/id (long id)
-         :from/is_bot is_bot}
-        (when username
-          {:from/username username})
-        (when language_code
-          {:from/language_code language_code})
-        (when first_name
-          {:from/first_name first_name})
-        (when last_name
-          {:from/last_name last_name})))
-     (let [{:keys [id first_name username type title all_members_are_administrators]} chat]
-       (merge
-        {:chat/id (long id)
-         :chat/type type}
-        (when username
-          {:chat/username username})
-        (when first_name
-          {:chat/first_name first_name})
-        (when title
-          {:chat/title title})
-        (when all_members_are_administrators
-          {:chat/all_members_are_administrators all_members_are_administrators})))
-     (merge
-      {:message/id (long message_id)
-       :message/from [:from/id (long (:id from))]
-       :message/chat [:chat/id (long (:id chat))]
-       :message/date (java.util.Date. (long (* 1000 date)))}
-      (when text
-        {:message/text text})
-      (when (seq tags)
-        {:message/tag tags}))]))
+    (vec
+     (concat
+      (when from
+        [(let [{:keys [id is_bot first_name last_name username language_code]} from]
+           (merge
+            {:from/id (long id)
+             :from/is_bot is_bot}
+            (when username
+              {:from/username username})
+            (when language_code
+              {:from/language_code language_code})
+            (when first_name
+              {:from/first_name first_name})
+            (when last_name
+              {:from/last_name last_name})))])
+      (when chat
+        [(let [{:keys [id first_name username type title all_members_are_administrators]} chat]
+           (merge
+            {:chat/id (long id)
+             :chat/type type}
+            (when username
+              {:chat/username username})
+            (when first_name
+              {:chat/first_name first_name})
+            (when title
+              {:chat/title title})
+            (when all_members_are_administrators
+              {:chat/all_members_are_administrators all_members_are_administrators})))])
+      [(merge
+        {:message/id (long message_id)
+         :message/from [:from/id (long (:id from))]
+         :message/chat [:chat/id (long (:id chat))]
+         :message/date (java.util.Date. (long (* 1000 date)))}
+        (when text
+          {:message/text text})
+        (when (seq tags)
+          {:message/tag tags}))]))))
 
 
 ;; TODO factor into youtube middleware
@@ -306,8 +310,11 @@
                                _ (debug "active tags" #_summaries active-tags)
 
                           ;; 4. derive reply
-                               assist-prompt (format pr/assistance (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
-                                                                                         summaries)) conv)
+                               assist-prompt (format pr/assistance 
+                                                     (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
+                                                                           summaries)) 
+                                                     conv
+                                                     (str (java.util.Date.)))
                                _ (debug "prompt" assist-prompt)
                                reply (<? S (reasoner-llm assist-prompt))
                                _ (debug "reply" reply)
@@ -321,26 +328,41 @@
                                _ (when-let [title (second (re-find #"ADD_ISSUE\(['\"](.*)['\"]\)" reply))]
                                    (debug "adding issue" title)
                                    (d/transact conn [{:db/id -1 :issue/title title}])
-                                   (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Added issue: " title))))))
+                                   (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Added issue: " title)))))))
 
                                _ (when-let [title (second (re-find #"REMOVE_ISSUE\(['\"](.*)['\"]\)" reply))]
                                    (if-let [eid (d/q '[:find ?i . :in $ ?t :where [?i :issue/title ?t]] @conn title)]
                                      (do
                                        (debug "removing issue" title eid)
                                        (d/transact conn [[:db/retractEntity eid]])
-                                       (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Removed issue: " title))))))
-                                     (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Could not find issue: " title)))))))
+                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Removed issue: " title)))))))
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find issue: " title))))))))
 
                                _ (when (.contains reply "LIST_ISSUES")
                                    (debug "listing issues")
                                    (let [issues (d/q '[:find [?t ...] :where [_ :issue/title ?t]] @conn)]
-                                     (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" issues))))))))
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
 
                                _ (when (.contains reply "SEND_NOTES")
-                               ;; TODO transact 
-                                   (<? S (send-document! (:id chat) (zip-notes (:id chat)))))
+                               ;; TODO transact document info
+                                   (<? S (send-document! (:id chat) (zip-notes (:id chat))))
+                                   (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) "Done."))))))
 
-                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE") (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES"))
+                               _ (when-let [title (second (re-find #"RETRIEVE_NOTE\(['\"](.*)['\"]\)" reply))]
+                                   (if-let [body (d/q '[:find ?b . :in $ ?t :where [?n :note/title ?t] [?n :note/body ?b]] @conn title)]
+                                     (do
+                                       (debug "retrieved note" title body)
+                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Retrieved " title "\n" body)))))))
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find note: " title))))))))
+
+                               _ (when (or (.contains reply "LIST_NOTES") (.contains reply "DAILY"))
+                                   (debug "listing notes")
+                                   (let [issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Notes:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
+
+
+                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE") 
+                                         (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "LIST_NOTES"))
                                    (debug "No reply necessary")
                                    (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
                                                  (let [url (<? S (search terms))
@@ -349,7 +371,7 @@
                                                        reply (<? S (cheap-llm prompt))]
                                                    (debug "conducting web search" terms)
                                                    (str reply "\n" url))
-                                                 reply)
+                                                 (.replace reply "DAILY" ""))
                                          send-time-ms (System/currentTimeMillis)
                                          min-response-time 3000
                                          too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
