@@ -28,6 +28,7 @@
 /target
 
 databases/
+notes/
 .clj-kondo/
 resources/config.edn
 *.log

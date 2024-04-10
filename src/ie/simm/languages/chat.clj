@@ -10,3 +10,7 @@
 (let [handler (create-upstream-msg-handler ::send-photo)]
   (defn send-photo! [chat-id msg]
     (handler chat-id msg)))
+
+(let [handler (create-upstream-msg-handler ::send-document)]
+  (defn send-document! [chat-id msg]
+    (handler chat-id msg)))

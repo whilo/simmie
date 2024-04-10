@@ -40,6 +40,7 @@
   (let [telegram-routes (routes
                          (POST "/telegram-callback" {body :body}
                            (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)
+                                 _ (debug "received telegram message:" msg)
                                  msg (fetch-voice! msg)
                                  m {:type ::message
                                     :request-id (uuid)
@@ -76,12 +77,15 @@
          prev-out (chan)
          po (pub prev-out (fn [{:keys [type]}]
                             (or ({:ie.simm.languages.chat/send-text ::send-text
-                                  :ie.simm.languages.chat/send-photo ::send-photo} type)
+                                  :ie.simm.languages.chat/send-photo ::send-photo
+                                  :ie.simm.languages.chat/send-document ::send-document} type)
                                 :unrelated)))
          send-text (chan)
          _ (sub po ::send-text send-text)
          send-photo (chan)
          _ (sub po ::send-photo send-photo)
+         send-document (chan)
+          _ (sub po ::send-document send-document)
 
          _ (sub po :unrelated out)]
         ;; this only triggers when in is closed and cleans up
@@ -95,7 +99,10 @@
                     (debug "sending telegram message:" chat-id msg)
                     (put? S in (assoc m
                                       :type :ie.simm.languages.chat/send-text-reply
-                                      :response (t/send-text (:telegram-bot-token config) chat-id msg)))
+                                      :response (try (t/send-text (:telegram-bot-token config) chat-id msg)
+                                                     (catch Exception e 
+                                                       (debug "error sending telegram message:" e) 
+                                                       e))))
                     (recur (<? S send-text))))
 
      (go-loop-try S [{[chat-id url] :args :as m} (<? S send-photo)]
@@ -103,8 +110,25 @@
                     (debug "sending telegram photo:" chat-id url)
                     (put? S in (assoc m
                                       :type :ie.simm.languages.chat/send-photo-reply
-                                      :response (t/send-photo (:telegram-bot-token config) chat-id url)))
+                                      :response (try
+                                                  (t/send-photo (:telegram-bot-token config) chat-id url)
+                                                  (catch Exception e 
+                                                    (debug "error sending telegram photo:" e) 
+                                                    e))))
                     (recur (<? S send-photo))))
+
+     (go-loop-try S [{[chat-id url] :args :as m} (<? S send-document)]
+                  (when m
+                    (debug "sending telegram document:" chat-id url)
+                    (put? S in (assoc m
+                                      :type :ie.simm.languages.chat/send-document-reply
+                                      :response (try
+                                                  (t/send-document (:telegram-bot-token config) chat-id url)
+                                                  (catch Exception e 
+                                                    (debug "error sending telegram document:" e) 
+                                                    e))))
+                    (recur (<? S send-document))))
+
      [S peer [next-in prev-out]])))
 
 (comment

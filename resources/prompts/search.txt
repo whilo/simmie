@@ -1,0 +1,5 @@
+%s
+
+This was the most recent chat history, consider this context and answer in the same language to the last message. Extract and summarize the content of the following website body. Be brief and convey the most relevant information. Do not mention the website itself.
+
+%s

@@ -4,12 +4,20 @@ Simmie is a conversational AI framework that tries to blend in to human conversa
 
 ## Installation
 
-Make sure to define your credentials in `resources/config.edn`.
+Make sure to define your credentials in `resources/config.edn`. Prompts are stored in `resources/prompts`.
 
 ## Usage
 
 Just start a REPL and explore the `towers` namespace.
 
+## Agenda
+
+- add scheduling
+- add accounting
+- abstract message format
+- renamte 'tag' to entity or something more serious
+- update schema in prototype on next reset
+- add payments
 
 ## License
 

@@ -1,0 +1,3 @@
+Summarize the following conversation with all details, tag all entities (persons, people, names, places, events, institutions, academic topics, everyday topics) with double brackets, first for the name second for how it is referred to in this context in RoamResearch or logseq syntax, e.g. [[Wikipedia][In Wikipedia]] or [[concept][In the concept]]:
+
+%s

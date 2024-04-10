@@ -1,10 +1,11 @@
 (ns ie.simm.simmie
   (:require [taoensso.timbre :as log]
             [taoensso.timbre.appenders.core :as appenders]
-            [superv.async :refer [S <? <??]]
+            [superv.async :refer [S go-try <? <??] :as sasync]
             [clojure.core.async :refer [chan close!]]
             [ie.simm.towers :refer [default debug test-tower]]
-            [nrepl.server :refer [start-server stop-server]])
+            [nrepl.server :refer [start-server stop-server]]
+            [ie.simm.prompts :as pr])
   (:gen-class))
 
 (defonce server (start-server :port 37888))
@@ -18,15 +19,18 @@
   "Starting a peer server."
   [& _args]
   (let [in (chan)
-        out (chan)
-        peer (atom {})]
-    ((debug) [S peer [in out]])
+        out (chan)]
+    (def chans [in out])
+    (def peer (atom {}))
+    (sasync/restarting-supervisor (fn [S] (go-try S ((debug) [S peer chans])))
+                                  :log-fn (fn [level msg] (log/log level msg)))
     (log/info "Server started.")
     ;; HACK to block
     (<?? S (chan))))
 
-
 (comment
+
+  (close! (first chans))
 
   ;; pull above let into top level defs
 
@@ -42,7 +46,56 @@
 
   (require '[datahike.api :as d])
 
-  (def conn (second (first (:conn @peer))))
+  (require '[ie.simm.runtimes.relational-assistance :refer [conversation extract-tags]])
+
+  (def conv (conversation conn 79524334 20))
+
+  (def conn ((:conn @peer) 79524334))
+
+  (require '[clojure.java.io :as io])
+
+  -4151611394 ;; Simulacion
+
+  (doseq [[t b] (d/q '[:find ?t ?b :where [?e :note/title ?t] [?e :note/body ?b]] @conn)]
+    (println "#" t)
+    (println b)
+    (println)
+   ;; write to org file in notes/chat-id/title.org
+    (let [f (io/file (str "notes/" 79524334 "/" t ".org"))]
+      (io/make-parents f)
+      (with-open [w (io/writer f)]
+        (binding [*out* w]
+          (println b)))))
+
+  (d/q '[:find ?t :where [?e :issue/title ?t]] @conn)
+
+  (println (d/q '[:find ?b . :in $ ?t :where [?e :note/title ?t] [?e :note/body ?b]] @conn "simmie_beta_bot"))
+
+  (doseq [[e] (d/q '[:find ?e :where [?e :note/title ?t] [?e :note/body ?b]] @conn)]
+    (println e)
+    (d/transact conn [[:db/retractEntity e]]))
+
+  (require '[superv.async :refer [<?? go-try S]]
+           '[ie.simm.runtimes.openai :refer [chat]]
+           '[ie.simm.prompts :as pr])
+
+  (def summary (chat #_"gpt-3.5-turbo" "gpt-4-1106-preview" (format pr/summarization-prompt conv)))
+
+  (def tags (distinct (extract-tags summary)))
+
+  (def new-notes
+    (for [tag tags]
+      (let [prompt (format pr/note-prompt tag "EMPTY" conv)]
+        [tag (chat #_"gpt-3.5-turbo" "gpt-4-1106-preview" prompt)])))
+
+  (doseq [[tag note] new-notes]
+    (println tag)
+    (println note))
+
+  (def christian-update
+    (let [tag "Christian"
+          prompt (format "Note on: %s\n\n%s\n\n\nGiven the note above on the subect, update it in light of the following conversation summary and return the new note text only (no title). References to entities (events, places, people, organisations, businesses etc.) are syntactically expressed with double brackets as in RoamResearch, Athens or logseq, e.g. [[some topic]]. Make sure you retain these references. Be brief and succinct while keeping important facts in detail.\n\n%s" tag "Christian is a PhD student at [[University of British Columbia][UBC]] with an interest in the programming languages Clojure and Julia and is not interested in climate science." conv)]
+      [tag (chat #_"gpt-3.5-turbo" "gpt-4-1106-preview" prompt)]))
 
   (:store @(:wrapped-atom conn))
 
@@ -56,12 +109,12 @@
 
   (d/q '[:find ?t :where [?c :chat/id ?t]] @conn)
 
-  (d/q '[:find (count ?m) .
+  (d/q '[:find ?m .
          :in $ ?cid
          :where
          [?m :message/chat ?c]
          [?c :chat/id ?cid]]
-       @conn -4199252441)
+       @conn 79524334)
 
   (d/q '[:find (pull ?c [:*]) :where [?c :conversation/summary ?s]] @conn)
 

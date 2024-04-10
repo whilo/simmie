@@ -27,6 +27,7 @@
  {:db/ident :message/chat
   :db/valueType :db.type/ref
   :db/cardinality :db.cardinality/one}
+
  {:db/ident :chat/id
   :db/valueType :db.type/long
   :db/cardinality :db.cardinality/one
@@ -49,6 +50,7 @@
  {:db/ident :chat/type
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/one}
+
  {:db/ident :message/date
   :db/valueType :db.type/instant
   :db/cardinality :db.cardinality/one}
@@ -58,9 +60,12 @@
  {:db/ident :message/tag
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/many}
+
  {:db/ident :issue/title
   :db/valueType :db.type/string
-  :db/cardinality :db.cardinality/one}
+  :db/cardinality :db.cardinality/one
+  ;;:db/unique :db.unique/identity
+  }
  {:db/ident :issue/id
   :db/valueType :db.type/long
   :db/unique :db.unique/identity
@@ -68,12 +73,10 @@
  {:db/ident :issue/priority
   :db/valueType :db.type/long
   :db/cardinality :db.cardinality/one}
- {:db/ident :issue/chat
-  :db/valueType :db.type/ref
-  :db/cardinality :db.cardinality/one}
  {:db/ident :issue/scheduled
   :db/valueType :db.type/instant
   :db/cardinality :db.cardinality/one}
+
  {:db/ident :conversation/summary
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/one}
@@ -81,5 +84,19 @@
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/many}
  {:db/ident :conversation/message
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/many}
+
+ {:db/ident :note/title
+  :db/valueType :db.type/string
+  :db/unique :db.unique/identity
+  :db/cardinality :db.cardinality/one}
+ {:db/ident :note/body
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/one}
+ {:db/ident :note/link
+  :db/valueType :db.type/ref
+  :db/cardinality :db.cardinality/many}
+ {:db/ident :note/summary
   :db/valueType :db.type/ref
   :db/cardinality :db.cardinality/many}]

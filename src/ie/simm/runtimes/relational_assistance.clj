@@ -6,18 +6,19 @@
             [ie.simm.languages.gen-ai :refer [cheap-llm reasoner-llm stt-basic image-gen]]
             [ie.simm.languages.web-search :refer [search]]
             [ie.simm.languages.browser :refer [extract-body]]
-            [ie.simm.languages.chat :refer [send-text! send-photo!]]
+            [ie.simm.languages.chat :refer [send-text! send-photo! send-document!]]
             [ie.simm.prompts :as pr]
-            [superv.async :refer [<?? go-try S go-loop-try <? >? put?]]
-            [clojure.core.async :refer [chan pub sub mult tap timeout]]
+            [superv.async :refer [<?? go-try S go-loop-try <? >? put? go-for] :as sasync]
+            [clojure.core.async :refer [chan pub sub mult tap timeout] :as async]
             [taoensso.timbre :refer [debug info warn error]]
             [datahike.api :as d]
             [hasch.core :refer [uuid]]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [etaoin.api :as e]))
+            [etaoin.api :as e])
+  (:import [java.util.zip ZipEntry ZipOutputStream]))
 
-(def default-schema (read-string (slurp "resources/schema.edn")))
+(def default-schema (read-string (slurp "resources/default_schema.edn")))
 
 (defn ensure-conn [peer chat-id]
   (or (get-in @peer [:conn chat-id])
@@ -37,7 +38,7 @@
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
-(defn conversation [conn chat-id window-size]
+(defn conversation [db chat-id window-size]
   (->>
    (d/q '[:find ?d ?f ?l ?n ?t
           :in $ ?chat
@@ -50,14 +51,14 @@
           [(get-else $ ?u :from/username "") ?n]
           [(get-else $ ?u :from/first_name "") ?f]
           [(get-else $ ?u :from/last_name "") ?l]]
-        @conn chat-id)
+        db chat-id)
    (sort-by first)
    (take-last window-size)
-   (map (fn [[d f l n t]] (str d " " f " " l " (" n "): " t)))
+   (map (fn [[d f l n t]] (str d " " f " " l " (" n "): " (str/replace t #"\n" " "))))
    (str/join "\n")))
 
 (defn extract-tags [text]
-  (mapv second (re-seq #"\[\[([^\[\]]+)\]\]" text)))
+  (vec (distinct (map second (re-seq #"\[\[([^\[\]]+)\](\[.+\])?\]" text)))))
 
 (defn msg->txs [message]
   (let [{:keys [message_id from chat date text]} message
@@ -115,6 +116,108 @@
 
   )
 
+
+(def window-size 10)
+
+(defn summarize [S conn conv chat]
+  (go-try S
+          (debug "=========================== SUMMARIZING ===============================")
+          (let [db @conn
+                summarization  (<? S (reasoner-llm (format pr/summarization conv)))
+                messages (->> (d/q '[:find ?d ?e
+                                     :in $ ?chat
+                                     :where
+                                     [?c :chat/id ?chat]
+                                     [?e :message/chat ?c]
+                                     [?e :message/date ?d]]
+                                   db (:id chat))
+                              (sort-by first)
+                              (take-last window-size)
+                              (map second))
+                note-titles (extract-tags summarization)
+                _ (debug "=========================== CREATING NOTES ===============================")
+                new-notes
+                (<? S (async/into []
+                                  (go-for S [[i note] (partition 2 (interleave (iterate inc 2) note-titles))
+                                             :let [[nid body] (first (d/q '[:find ?n ?b :in $ ?t :where [?n :note/title ?t] [(get-else $ ?n :note/body "EMPTY") ?b]] db note))
+                                                   prompt (format pr/note note body summarization #_conv)
+                                                   new-body (<? S (reasoner-llm prompt))]
+                                             :when (not (.contains new-body "SKIP"))
+                                             :let [new-refs (extract-tags new-body)
+                                                   ref-ids (mapv first (d/q '[:find ?n
+                                                                              :in $ [?t ...]
+                                                                              :where
+                                                                              [?n :note/title ?t]]
+                                                                            db new-refs))]]
+                                          {:db/id (or nid (- i))
+                                           :note/title note
+                                           :note/body new-body
+                                           :note/link ref-ids
+                                           :note/summary -1})))]
+            (debug "=========================== STORING NOTES ===============================")
+            (debug "Summarization:" summarization)
+            (debug "summarization tags" (extract-tags summarization))
+            (d/transact conn (concat
+                              [{:db/id -1
+                                :conversation/summary summarization
+                                :conversation/tag (extract-tags summarization)
+                                :conversation/message messages}]
+                              new-notes))
+                              ;; keep exports up to date
+            (doseq [[t b] (map (fn [{:keys [note/title note/body]}] [title body]) new-notes)]
+              (debug "writing note" t)
+              ;; write to org file in notes/chat-id/title.org
+              (let [f (io/file (str "notes/" (:id chat) "/" t ".org"))]
+                (io/make-parents f)
+                (with-open [w (io/writer f)]
+                  (binding [*out* w]
+                    (println b)))))
+            (extract-tags summarization))))
+
+(defn zip-notes [chat-id]
+  (let [zip-file (io/file (str "notes/" chat-id ".zip"))
+        zip-out (io/output-stream zip-file)
+        zip (ZipOutputStream. zip-out)
+        notes-dir (io/file (str "notes/" chat-id))
+        _ (io/make-parents notes-dir)
+        _ (io/make-parents zip-file)
+        _ (doseq [f (rest (file-seq notes-dir))]
+            (let [entry (ZipEntry. (str chat-id "/" (.getName f)))]
+              (.putNextEntry zip entry)
+              (with-open [in (io/input-stream f)]
+                (io/copy in zip))
+              (.closeEntry zip)))]
+    (.close zip)
+    (.close zip-out)
+    zip-file))
+
+(defn extract-url [S text chat]
+  (go-try S
+          (if-let [;; if text matches http or https web URL extrect URL with regex
+                   url (re-find #"https?://\S+" text)]
+            (if-let [;; extract youtube video id from URL
+                     youtube-id (second (or (re-find #"youtube.com/watch\?v=([^&]+)" url)
+                                            (re-find #"youtu.be/([^\?]+)" url)))]
+              (try
+                (debug "summarizing youtube transcript" youtube-id)
+                (let [transcript (youtube-transcript youtube-id)
+                      summary (<? S (cheap-llm (format pr/summarization transcript)))
+                      summary (str "Youtube transcript summary:\n" summary "\n" url)]
+                  (<? S (send-text! (:id chat) summary))
+                  summary)
+                (catch Exception e
+                  (warn "Could not extract transcript from youtube video" youtube-id e)
+                  text))
+              (try
+                (let [body (<? S (extract-body url))
+                      summary (<? S (cheap-llm (format pr/summarization body)))]
+                  (<? S (send-text! (:id chat) summary))
+                  (str "Website summary:\n" summary "\n" url))
+                (catch Exception e
+                  (warn "Could not extract body from URL" url e)
+                  text)))
+            text)))
+
 (defn relational-assistance
   "This interpreter can derive facts and effects through a relational database."
   [[S peer [in out]]]
@@ -145,37 +248,19 @@
                  (when m
                    (binding [lb/*chans* [next-in pi out po]]
                      (let [{:keys [msg]
-                            {:keys [text chat voice-path]} :msg} m]
+                            {:keys [text chat voice-path from]} :msg} m]
                        (try
                          (let [_ (debug "received message" m)
+                               firstname (:first_name from)
                                start-time-ms (System/currentTimeMillis)
                                text (if-not voice-path text
-                                            (let [transcript (<? S (stt-basic voice-path))]
+                                            (let [transcript (<? S (stt-basic voice-path))
+                                                  transcript (str "Voice transcript " (:username from) ":\n" transcript)]
                                               (when text (warn "Ignoring text in favor of voice message"))
                                               (debug "created transcript" transcript)
                                               (<? S (send-text! (:id chat) transcript))
                                               transcript))
-                               text (when-let [;; if text matches http or https web URL extrect URL with regex
-                                               url (re-find #"https?://\S+" text)]
-                                      (if-let [;; extract youtube video id from URL
-                                               youtube-id (second (re-find #"youtube.com/watch\?v=([^&]+)" url))]
-                                        (try
-                                          (let [transcript (youtube-transcript youtube-id)
-                                                summary (<? S (cheap-llm (format pr/summarization-prompt transcript)))
-                                                summary (str "Youtube transcript summary:\n" summary "\n" url)]
-                                            (<? S (send-text! (:id chat) summary))
-                                            summary)
-                                          (catch Exception e
-                                            (warn "Could not extract transcript from youtube video" youtube-id e)
-                                            text))
-                                        (try
-                                          (let [body (<? S (extract-body url))
-                                                summary (<? S (cheap-llm (format pr/summarization-prompt body)))]
-                                            (<? S (send-text! (:id chat) summary))
-                                            (str "Website summary:\n" summary "\n" url))
-                                          (catch Exception e
-                                            (warn "Could not extract body from URL" url e)
-                                            text))))
+                               text (<? S (extract-url S text chat))
                                msg (assoc msg :text text)
 
                                conn (ensure-conn peer (:id chat))
@@ -185,79 +270,95 @@
                                _ (d/transact conn (msg->txs msg))
                                _ (debug "transacted")
                            ;; 2. recent conversation
-                               window-size 20
-                               conv (conversation conn (:id chat) window-size)
+                               conv (conversation @conn (:id chat) window-size)
                                _ (debug "conversation" conv)
-                               _ (when (zero? (mod (d/q '[:find (count ?m) .
-                                                          :in $ ?cid
-                                                          :where
-                                                          [?m :message/chat ?c]
-                                                          [?c :chat/id ?cid]]
-                                                        @conn (:id chat))
-                                                   window-size))
-                                   (let [summarization  (<? S (reasoner-llm (format pr/summarization-prompt conv)))
-                                         messages (->> (d/q '[:find ?d ?e
-                                                              :in $ ?chat
-                                                              :where
-                                                              [?c :chat/id ?chat]
-                                                              [?e :message/chat ?c]
-                                                              [?e :message/date ?d]]
-                                                            @conn (:id chat))
-                                                       (sort-by first)
-                                                       (take-last window-size)
-                                                       (map second))]
-                                     (debug "messages" messages)
-                                     (debug "Summarization:" summarization)
-                                     (<? S (send-text! (:id chat) (str "Note on recent conversation:\n" summarization)))
-                                     (debug "with tags" (extract-tags summarization))
-                                     (reset! active-tags (extract-tags summarization))
-                                     (debug (d/transact conn [{:db/id -1
-                                                               :conversation/summary summarization
-                                                               :conversation/tag (extract-tags summarization)
-                                                               :conversation/message messages}]))))
+                               _ (debug "message count" (d/q '[:find (count ?m) .
+                                                               :in $ ?cid
+                                                               :where
+                                                               [?m :message/chat ?c]
+                                                               [?c :chat/id ?cid]]
+                                                             @conn (:id chat)))
+                               _ (when (<= (mod (d/q '[:find (count ?m) .
+                                                       :in $ ?cid
+                                                       :where
+                                                       [?m :message/chat ?c]
+                                                       [?c :chat/id ?cid]]
+                                                     @conn (:id chat))
+                                                window-size) 1)
+                                   (summarize S conn conv chat)
+                                   #_(reset! active-tags
+                                             (concat (<? S) [firstname])))
+
 
                            ;; 3. retrieve summaries for active tags
-                               summaries (d/q '[:find [?s ...]
+                               all-tags (d/q '[:find [?t ...] :where [_ :conversation/tag ?t]] @conn)
+                               relevant (<? S (cheap-llm (format "You are given the following tags in brackets [[some tag]]:\n\n%s\n\nList the most relevant tags for the following conversation with descending priority.\n\n%s"
+                                                                 (str/join ", " (map #(str "[[" % "]]") all-tags))
+                                                                 conv)))
+                               active-tags (concat (take 3 (extract-tags relevant)) [firstname])
+
+                               summaries (d/q '[:find ?t ?s
                                                 :in $ [?t ...]
                                                 :where
-                                                [?c :conversation/tag ?t]
-                                                [?c :conversation/summary ?s]]
-                                              @conn (concat @active-tags (extract-tags conv)))
-                               _ (debug "active summaries" summaries @active-tags)
-                               _ (when (empty? @active-tags)
-                                   (let [tags (d/q '[:find [?t ...] :where [_ :conversation/tag ?t]] @conn)
-                                         relevant (<? S (cheap-llm (format "You are given the following tags in brackets [[some tag]]:\n\n%s\n\nList the most relevant tags for the following conversation.\n\n%s"
-                                                                           (str/join ", " (map #(str "[[" % "]]") tags))
-                                                                           conv)))]
-                                     (debug "maybe relevant tags" relevant
-                                            (reset! active-tags (extract-tags relevant)))))
+                                                [?c :note/title ?t]
+                                                [?c :note/body ?s]]
+                                              @conn (concat active-tags (extract-tags conv)))
+                               _ (debug "active tags" #_summaries active-tags)
 
-                          ;; 2. derive reply
-                               reply (<? S (cheap-llm (format pr/assistance-prompt (str/join "\n\n" summaries) conv)))
-                               _ (debug "reply" reply)]
-                           (when-not (or (.contains reply "WEBSEARCH") (.contains reply "QUIET"))
-                             (when-let [prompt (second (re-find #"IMAGEGEN\('(.*)'\)" reply))]
-                               (let [url (<? S (image-gen prompt))]
-                                 (debug "generated image" url)
-                                 (d/transact conn (msg->txs (:result (<? S (send-photo! (:id chat) url))))))))
-                           (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN"))
-                             (debug "No reply necessary")
-                             (let [reply (if-let [terms (second (re-find #"WEBSEARCH\('(.*)'\)" reply))]
-                                           (let [url (<? S (search terms))
-                                                 body (<? S (extract-body url))
-                                                 prompt (format pr/search-prompt terms body)
-                                                 reply (<? S (cheap-llm prompt))]
-                                             (debug "conducting web search" terms)
-                                             (str reply "\n" url))
-                                           reply)
-                                   send-time-ms (System/currentTimeMillis)
-                                   min-response-time 3000
-                                   too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
-                                   _ (debug "too fast by" too-fast-by)
-                                   _ (<? S (timeout too-fast-by))
-                                   reply-msg (<? S (send-text! (:id chat) reply))
-                                   _ (debug "reply-msg" reply-msg)
-                                   _ (d/transact conn (msg->txs (:result reply-msg)))])))
+                          ;; 4. derive reply
+                               assist-prompt (format pr/assistance (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
+                                                                                         summaries)) conv)
+                               _ (debug "prompt" assist-prompt)
+                               reply (<? S (reasoner-llm assist-prompt))
+                               _ (debug "reply" reply)
+
+                               ;; 5. dispatch
+                               _ (when-let [prompt (second (re-find #"IMAGEGEN\(['\"](.*)['\"]\)" reply))]
+                                   (let [url (<? S (image-gen prompt))]
+                                     (debug "generated image" url)
+                                     (d/transact conn (msg->txs (:result (<? S (send-photo! (:id chat) url)))))))
+
+                               _ (when-let [title (second (re-find #"ADD_ISSUE\(['\"](.*)['\"]\)" reply))]
+                                   (debug "adding issue" title)
+                                   (d/transact conn [{:db/id -1 :issue/title title}])
+                                   (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Added issue: " title))))))
+
+                               _ (when-let [title (second (re-find #"REMOVE_ISSUE\(['\"](.*)['\"]\)" reply))]
+                                   (if-let [eid (d/q '[:find ?i . :in $ ?t :where [?i :issue/title ?t]] @conn title)]
+                                     (do
+                                       (debug "removing issue" title eid)
+                                       (d/transact conn [[:db/retractEntity eid]])
+                                       (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Removed issue: " title))))))
+                                     (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Could not find issue: " title)))))))
+
+                               _ (when (.contains reply "LIST_ISSUES")
+                                   (debug "listing issues")
+                                   (let [issues (d/q '[:find [?t ...] :where [_ :issue/title ?t]] @conn)]
+                                     (d/transact conn (msg->txs (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" issues))))))))
+
+                               _ (when (.contains reply "SEND_NOTES")
+                               ;; TODO transact 
+                                   (<? S (send-document! (:id chat) (zip-notes (:id chat)))))
+
+                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE") (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES"))
+                                   (debug "No reply necessary")
+                                   (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
+                                                 (let [url (<? S (search terms))
+                                                       body (<? S (extract-body url))
+                                                       prompt (format pr/search (conversation @conn (:id chat) 5) body)
+                                                       reply (<? S (cheap-llm prompt))]
+                                                   (debug "conducting web search" terms)
+                                                   (str reply "\n" url))
+                                                 reply)
+                                         send-time-ms (System/currentTimeMillis)
+                                         min-response-time 3000
+                                         too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
+                                         _ (debug "too fast by" too-fast-by)
+                                         _ (<? S (timeout too-fast-by))
+                                         reply-msg (<? S (send-text! (:id chat) reply))
+                                         _ (debug "reply-msg" reply-msg)
+                                         _ (d/transact conn (msg->txs (:result reply-msg)))]))]
+                           )
                          (catch Exception e
                            (let [error-id (uuid)]
                              (error "Could not process message(" error-id "): " m e)
@@ -348,7 +449,7 @@
                             (notify! id "Pausing for now. You can turn it on again with /assist.")))
 
     (h/command-fn "summarize" (fn [{{id :id :as chat} :chat}]
-                                (let [summary (openai/chat "gpt-3.5-turbo" (format pr/summarization-prompt (conversation id)))]
+                                (let [summary (openai/chat "gpt-3.5-turbo" (format pr/summarization (conversation id)))]
                                   (debug "Generated summary: " summary)
                                   (notify! id
                                            #_{:reply_markup {:inline_keyboard [[{:text "Good" :callback_data "good"}
