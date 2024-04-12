@@ -34,7 +34,7 @@
                 conn)
               (catch Exception _
                 (d/connect cfg)))]
-        (d/transact conn default-schema)
+        #_(d/transact conn default-schema)
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
@@ -100,26 +100,6 @@
           {:message/text text})
         (when (seq tags)
           {:message/tag tags}))]))))
-
-
-;; TODO factor into youtube middleware
-;; require libpython
-
-(require '[libpython-clj2.require :refer [require-python]] 
-         '[libpython-clj2.python :refer [py. py.. py.-] :as py])
-
-(require-python '[youtube_transcript_api :refer [YouTubeTranscriptApi]])
-
-(defn youtube-transcript [video-id]
-  ;; " ".join([t['text'] for t in transcript])
-  (let [transcript (py. YouTubeTranscriptApi get_transcript video-id)]
-    (str/join " " (map :text transcript))))
-
-(comment
-  (youtube-transcript "20TAkcy3aBY")
-
-  )
-
 
 (def window-size 10)
 
@@ -195,33 +175,6 @@
     (.close zip-out)
     zip-file))
 
-(defn extract-url [S text chat]
-  (go-try S
-          (if-let [;; if text matches http or https web URL extrect URL with regex
-                   url (re-find #"https?://\S+" text)]
-            (if-let [;; extract youtube video id from URL
-                     youtube-id (second (or (re-find #"youtube.com/watch\?v=([^&]+)" url)
-                                            (re-find #"youtu.be/([^\?]+)" url)))]
-              (try
-                (debug "summarizing youtube transcript" youtube-id)
-                (let [transcript (youtube-transcript youtube-id)
-                      summary (<? S (cheap-llm (format pr/summarization transcript)))
-                      summary (str "Youtube transcript summary:\n" summary "\n" url)]
-                  (<? S (send-text! (:id chat) summary))
-                  summary)
-                (catch Exception e
-                  (warn "Could not extract transcript from youtube video" youtube-id e)
-                  text))
-              (try
-                (let [body (<? S (extract-body url))
-                      summary (<? S (cheap-llm (format pr/summarization body)))]
-                  (<? S (send-text! (:id chat) summary))
-                  (str "Website summary:\n" summary "\n" url))
-                (catch Exception e
-                  (warn "Could not extract body from URL" url e)
-                  text)))
-            text)))
-
 (defn relational-assistance
   "This interpreter can derive facts and effects through a relational database."
   [[S peer [in out]]]
@@ -250,20 +203,11 @@
                  (when m
                    (binding [lb/*chans* [next-in pi out po]]
                      (let [{:keys [msg]
-                            {:keys [text chat voice-path from]} :msg} m]
+                            {:keys [chat from]} :msg} m]
                        (try
                          (let [_ (debug "received message" m)
                                firstname (:first_name from)
                                start-time-ms (System/currentTimeMillis)
-                               text (if-not voice-path text
-                                            (let [transcript (<? S (stt-basic voice-path))
-                                                  transcript (str "Voice transcript " (:username from) ":\n" transcript)]
-                                              (when text (warn "Ignoring text in favor of voice message"))
-                                              (debug "created transcript" transcript)
-                                              (<? S (send-text! (:id chat) transcript))
-                                              transcript))
-                               text (<? S (extract-url S text chat))
-                               msg (assoc msg :text text)
 
                                conn (ensure-conn peer (:id chat))
                                _ (debug "conn" conn)
