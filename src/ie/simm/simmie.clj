@@ -48,7 +48,7 @@
 
   (require '[datahike.api :as d])
 
-  (require '[ie.simm.runtimes.relational-assistance :refer [conversation extract-tags]])
+  (require '[ie.simm.runtimes.assistance :refer [conversation extract-tags]])
 
   (def conv (conversation conn 79524334 20))
 

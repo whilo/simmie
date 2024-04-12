@@ -5,7 +5,7 @@
             [ie.simm.runtimes.etaoin :refer [etaoin]]
             [ie.simm.runtimes.telegram :refer [telegram long-polling]]
             [ie.simm.runtimes.text-extractor :refer [text-extractor]]
-            [ie.simm.runtimes.relational-assistance :refer [relational-assistance]]
+            [ie.simm.runtimes.assistance :refer [assistance]]
             [kabel.peer :refer [drain]]
             [clojure.core.async :refer [close!]]
             [superv.async :refer [go-loop-super <? S]]))
@@ -18,7 +18,7 @@
   [S peer [in out]])
 
 (defn default []
-  (comp drain brave etaoin openai relational-assistance text-extractor telegram codrain))
+  (comp drain brave etaoin openai assistance text-extractor telegram codrain))
 
 (defn debug [] 
   (comp drain 
@@ -29,8 +29,8 @@
         (partial report #(println "etaoin: " (:type %) (:request-id %)))
         openai
         (partial report #(println "openai: " (:type %) (:request-id %)))
-        relational-assistance
-        (partial report #(println "relational-assistance: " (:type %) (:request-id %)))
+        assistance
+        (partial report #(println "assistance: " (:type %) (:request-id %)))
         text-extractor
         (partial report #(println "text-extractor: " (:type %) (:request-id %)))
         telegram
@@ -46,8 +46,8 @@
          (partial report #(println "etaoin: " (:type %) (:request-id %)))
          openai
          (partial report #(println "openai: " (:type %) (:request-id %)))
-         relational-assistance
-         (partial report #(println "relational-assistance: " (:type %) (:request-id %)))
+         assistance
+         (partial report #(println "assistance: " (:type %) (:request-id %)))
          text-extractor
          (partial report #(println "text-extractor: " (:type %) (:request-id %)))
          (partial telegram long-polling)

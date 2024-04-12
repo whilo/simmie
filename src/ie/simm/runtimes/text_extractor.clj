@@ -58,14 +58,20 @@
   [[S peer [in out]]]
   ;; pass everything from in to next-in for the next middleware
   ;; and create publication channel for runtime context
-  (let [pi (pub in :type)
-        next-in (chan 1000)
+  (let [mi (mult in)
+        pub-in (chan)
+        _ (tap mi pub-in)
+        ;; pub for internal function dispatch
+        pi (pub pub-in :type)
 
-        ;; subscriptions for this runtime context
-        p (pub in (fn [{:keys [type]}]
-                    (or ({:ie.simm.runtimes.telegram/message ::message} type)
-                        :unrelated)))
+        ;; internal subscriptions for this runtime context
+        pub-subs (chan)
+        _ (tap mi pub-subs)
+        p (pub pub-subs (fn [{:keys [type]}]
+                          (or ({:ie.simm.runtimes.telegram/message ::message} type)
+                              :unrelated)))
         msg-ch (chan 1000)
+        next-in (chan 1000)
         _ (sub p ::message msg-ch)
         _ (sub p :unrelated next-in)
 
