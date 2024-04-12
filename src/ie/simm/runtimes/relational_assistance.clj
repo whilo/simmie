@@ -235,7 +235,7 @@
         pi (pub pub-in :type)
 
        ;; subscriptions for this runtime context
-        msg-ch (chan)
+        msg-ch (chan 1000)
         _ (sub pi :ie.simm.runtimes.telegram/message msg-ch)
 
        ;; do the same in reverse for outputs from below

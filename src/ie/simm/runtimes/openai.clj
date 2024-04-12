@@ -8,8 +8,7 @@
             [taoensso.timbre :refer [debug warn]]
             [ie.simm.config :refer [config]]
             [clojure.core.async :refer [chan pub sub]]
-            [superv.async :refer [S go-try go-loop-try <? put?]]
-            [etaoin.api :as e]))
+            [superv.async :refer [S go-try go-loop-try <? put?]]))
 
 (require-python '[openai :refer [OpenAI]])
 
