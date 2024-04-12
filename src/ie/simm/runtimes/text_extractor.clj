@@ -99,7 +99,6 @@
                                text (<? S (extract-url S text chat))
                                msg (assoc msg :text text)
                                m (assoc m :msg msg)]
-                           (prn "NEW M" m)
                            (>? S next-in m))
                          (catch Exception e
                            (let [error-id (uuid)]

@@ -91,6 +91,9 @@
     (.close zip-out)
     zip-file))
 
+
+(def base-url "https://ec2-34-218-223-7.us-west-2.compute.amazonaws.com")
+
 (defn assistance
   "This interpreter can derive facts and effects through a relational database."
   [[S peer [in out]]]
@@ -113,7 +116,26 @@
         _ (tap mo out)
         pub-out (chan)
         _ (tap mo pub-out)
-        po (pub pub-out :type)]
+        po (pub pub-out :type)
+
+        ;; TODO figure out prefix, here conflict if notes/
+        routes [["/download/notes/:chat-id/notes.zip"
+                 {:get (fn [{{:keys [chat-id]} :path-params}]
+                         {:status 200 :body (zip-notes chat-id)})}]
+                ["/notes/:chat-id"
+                 {:get (fn [{{:keys [chat-id]} :path-params}]
+                         ;; list the notes in basic HTML
+                         {:status 200
+                          :body (str "<html><body><h1>Notes</h1><a href=\"/download/notes/" chat-id "/notes.zip\">Download</a><ul>"
+                                     (str/join "" (map (fn [f] (str "<li><a href=\"/" f "\">" f "</a></li>"))
+                                                       (rest (file-seq (io/file (str "notes/" chat-id))))))
+                                     "</ul></body></html>")})}]
+                ;; access each individual node link as referenced above
+                ["/notes/:chat-id/:note"
+                 {:get (fn [{{:keys [chat-id note]} :path-params}]
+                         {:status 200
+                          :body (slurp (io/file (str "notes/" chat-id "/" note)))})}]]]
+    (swap! peer assoc-in [:http :routes :assistance] routes)
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]
                  (when m
@@ -166,9 +188,9 @@
                                _ (debug "active tags" #_summaries active-tags)
 
                           ;; 4. derive reply
-                               assist-prompt (format pr/assistance 
+                               assist-prompt (format pr/assistance
                                                      (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
-                                                                           summaries)) 
+                                                                           summaries))
                                                      conv
                                                      (str (java.util.Date.)))
                                _ (debug "prompt" assist-prompt)
@@ -213,11 +235,11 @@
 
                                _ (when (.contains reply "LIST_NOTES")
                                    (debug "listing notes")
-                                   (let [issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Notes:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
+                                   (let [#_#_issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Notes:\n" (format "%s/notes/%s" base-url (:id chat)) #_(str/join "\n" (map #(format "* %s" %) issues))))))))))
 
 
-                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE") 
+                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE")
                                          (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "LIST_NOTES"))
                                    (debug "No reply necessary")
                                    (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
@@ -235,8 +257,7 @@
                                          _ (<? S (timeout too-fast-by))
                                          reply-msg (<? S (send-text! (:id chat) reply))
                                          _ (debug "reply-msg" reply-msg)
-                                         _ (d/transact conn (msg->txs (:result reply-msg)))]))]
-                           )
+                                         _ (d/transact conn (msg->txs (:result reply-msg)))]))])
                          (catch Exception e
                            (let [error-id (uuid)]
                              (error "Could not process message(" error-id "): " m e)

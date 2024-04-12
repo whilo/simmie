@@ -10,7 +10,6 @@
             [compojure.core :refer [routes POST]]
             [compojure.route :as route]
             [jsonista.core :as json]
-            [ring.adapter.jetty :refer [run-jetty]]
             [superv.async :refer [go-try S <? <?? go-loop-try put?]]
             [taoensso.timbre :refer [debug]]
             [hasch.core :refer [uuid]]
@@ -37,7 +36,7 @@
                                   (io/file local-path))]
                    local-path))))
 
-(defn server [in]
+(defn server [peer in]
   (let [telegram-routes (routes
                          (POST "/telegram-callback" {body :body}
                            (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)
@@ -49,11 +48,22 @@
                              (put? S in m)
                              {:body "Thanks!"}))
                          (route/not-found "Not Found"))
-        _ (debug "starting jetty telegram server")
-        server (run-jetty telegram-routes {:port 8080 :join? false})]
-    #(.stop server)))
+        telegram-routes [["/telegram-callback" {:post 
+                                               (fn [{:keys [body]}]
+                                                 (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)]
+                                                   (debug "received telegram message:" msg)
+                                                   (put? S in {:type ::message :request-id (uuid) :msg (fetch-voice! msg)})
+                                                   {:status 200 :body "Success."}))
+                                               #_{:parameters {:body [:map]}
+                                                      :responses  {200 {:body [:map]}}
+                                                      :handler    _}}]]
+        _ (debug "created telegram routes")
+        ;;server (run-jetty telegram-routes {:port 8080 :join? false})
+        ]
+    (swap! peer assoc-in [:http :routes :telegram] telegram-routes)
+    #(fn [])))
 
-(defn long-polling [in]
+(defn long-polling [peer in]
   (let [_ (h/defhandler bot-api
             (h/message-fn (fn [message]
                             (debug "received telegram message:" message)
@@ -68,7 +78,7 @@
   ([[S peer [in out]]]
    (telegram server [S peer [in out]]))
   ([mechanism [S peer [in out]]]
-   (let [stop-fn (mechanism in)
+   (let [stop-fn (mechanism peer in)
          p (pub in (fn [_] :always))
          next-in (chan)
          _ (sub p :always next-in)

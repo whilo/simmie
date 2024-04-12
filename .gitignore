@@ -29,6 +29,7 @@
 
 databases/
 notes/
+downloads/
 .clj-kondo/
 resources/config.edn
 *.log

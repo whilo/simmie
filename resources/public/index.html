@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Simmie</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css">
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+        }
+        .full-height {
+            height: 100%;
+        }
+        .content {
+            color: black;
+            background-color: white;
+            padding: 20px;
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <section class="hero is-fullheight">
+        <div class="hero-head">
+            <header class="navbar">
+                <div class="container">
+                    <div id="navbarMenu" class="navbar-menu">
+                        <div class="navbar-start">
+                            <a class="navbar-item" href="#">Home</a>
+                            <a class="navbar-item" href="#">Features</a>
+                            <a class="navbar-item" href="#">About</a>
+                        </div>
+                    </div>
+                    <div class="navbar-brand">
+                        <a class="navbar-item" href="/">
+                            <img src="simmie.png" alt="Simmie logo">
+                        </a>
+                        <span class="navbar-burger" data-target="navbarMenu">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </span>
+                    </div>
+                </div>
+            </header>
+        </div>
+        <div class="hero-body">
+            <div class="container has-text-centered">
+                <div class="content">
+                    <h1>Hey!</h1>
+                    <p>Simmie is a conversational AI system that combines different forms of intelligence to help you pursue your goals or just have fun.</p>
+                </div>
+            </div>
+        </div>
+        <div class="hero-foot">
+            <footer class="footer">
+                <div class="content has-text-centered">
+                    <p>Copyright © 2024 Christian Weilbach. All rights reserved.</p>
+                </div>
+            </footer>
+        </div>
+    </section>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get all "navbar-burger" elements
+            const $navbarBurgers = Array.prototype.slice.call(document.querySelectorAll('.navbar-burger'), 0);
+
+            // Check if there are any navbar burgers
+            if ($navbarBurgers.length > 0) {
+
+                // Add a click event on each of them
+                $navbarBurgers.forEach(el => {
+                    el.addEventListener('click', () => {
+
+                        // Get the target from the "data-target" attribute
+                        const target = el.dataset.target;
+                        const $target = document.getElementById(target);
+
+                        // Toggle the "is-active" class on both the "navbar-burger" and the targeted "navbar-menu"
+                        el.classList.toggle('is-active');
+                        $target.classList.toggle('is-active');
+
+                    });
+                });
+            }
+        });
+    </script>
+</body>
+</html>

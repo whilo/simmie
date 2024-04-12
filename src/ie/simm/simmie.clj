@@ -2,14 +2,14 @@
   (:require [taoensso.timbre :as log]
             [taoensso.timbre.appenders.core :as appenders]
             [superv.async :refer [S go-try <? <??] :as sasync]
+            [ie.simm.http :refer [ring-handler]]
+            [ring.adapter.jetty :refer [run-jetty]]
             [clojure.core.async :refer [chan close!]]
             [ie.simm.towers :refer [default debug test-tower]]
-            [nrepl.server :refer [start-server stop-server]]
-            [ie.simm.prompts :as pr]
-            [datahike.experimental.gc :as gc])
+            [nrepl.server :refer [start-server stop-server]])
   (:gen-class))
 
-(defonce server (start-server :port 37888))
+(defonce nrepl-server (start-server :port 37888))
 
 (log/merge-config!
   {:appenders {:spit (appenders/spit-appender {:fname "server.log"})}})
@@ -23,7 +23,15 @@
         out (chan)]
     (def chans [in out])
     (def peer (atom {}))
-    (sasync/restarting-supervisor (fn [S] (go-try S ((debug) [S peer chans])))
+    (sasync/restarting-supervisor (fn [S] (go-try S 
+                                                  ((debug) [S peer chans])
+                                                  (let [ring (ring-handler (get-in @peer [:http :routes]))
+                                                        server (run-jetty ring {:port 8080 :join? false})]
+                                                    (swap! peer assoc-in [:http :server] server)
+                                                    (log/info "Server started.")
+                                                    ;; this only unblocks on crash
+                                                    (<? S (chan))
+                                                    (.stop server))))
                                   :delay (* 10 1000)
                                   :log-fn (fn [level msg] (log/log level msg)))
     (log/info "Server started.")
