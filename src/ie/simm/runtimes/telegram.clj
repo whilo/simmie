@@ -31,10 +31,11 @@
                        file-path (-> (t/get-file token file_id)
                                      :result
                                      :file_path)
-                       rand-path (str "/tmp/" (java.util.UUID/randomUUID) ".oga")
+                       local-path (str "downloads/telegram/" file-path ".oga")
+                       _ (io/make-parents local-path)
                        _ (io/copy (:body (http/get (str "https://api.telegram.org/file/bot" token "/" file-path) {:as :byte-array}))
-                                  (io/file rand-path))]
-                   rand-path))))
+                                  (io/file local-path))]
+                   local-path))))
 
 (defn server [in]
   (let [telegram-routes (routes
@@ -85,7 +86,7 @@
          send-photo (chan)
          _ (sub po ::send-photo send-photo)
          send-document (chan)
-          _ (sub po ::send-document send-document)
+         _ (sub po ::send-document send-document)
 
          _ (sub po :unrelated out)]
         ;; this only triggers when in is closed and cleans up
@@ -97,36 +98,36 @@
      (go-loop-try S [{[chat-id msg] :args :as m} (<? S send-text)]
                   (when m
                     (debug "sending telegram message:" chat-id msg)
-                    (put? S in (assoc m
-                                      :type :ie.simm.languages.chat/send-text-reply
-                                      :response (try (t/send-text (:telegram-bot-token config) chat-id msg)
-                                                     (catch Exception e 
-                                                       (debug "error sending telegram message:" e) 
-                                                       e))))
+                    (put? S next-in (assoc m
+                                           :type :ie.simm.languages.chat/send-text-reply
+                                           :response (try (t/send-text (:telegram-bot-token config) chat-id msg)
+                                                          (catch Exception e
+                                                            (debug "error sending telegram message:" e)
+                                                            e))))
                     (recur (<? S send-text))))
 
      (go-loop-try S [{[chat-id url] :args :as m} (<? S send-photo)]
                   (when m
                     (debug "sending telegram photo:" chat-id url)
-                    (put? S in (assoc m
-                                      :type :ie.simm.languages.chat/send-photo-reply
-                                      :response (try
-                                                  (t/send-photo (:telegram-bot-token config) chat-id url)
-                                                  (catch Exception e 
-                                                    (debug "error sending telegram photo:" e) 
-                                                    e))))
+                    (put? S next-in (assoc m
+                                           :type :ie.simm.languages.chat/send-photo-reply
+                                           :response (try
+                                                       (t/send-photo (:telegram-bot-token config) chat-id url)
+                                                       (catch Exception e
+                                                         (debug "error sending telegram photo:" e)
+                                                         e))))
                     (recur (<? S send-photo))))
 
      (go-loop-try S [{[chat-id url] :args :as m} (<? S send-document)]
                   (when m
                     (debug "sending telegram document:" chat-id url)
-                    (put? S in (assoc m
-                                      :type :ie.simm.languages.chat/send-document-reply
-                                      :response (try
-                                                  (t/send-document (:telegram-bot-token config) chat-id url)
-                                                  (catch Exception e 
-                                                    (debug "error sending telegram document:" e) 
-                                                    e))))
+                    (put? S next-in (assoc m
+                                           :type :ie.simm.languages.chat/send-document-reply
+                                           :response (try
+                                                       (t/send-document (:telegram-bot-token config) chat-id url)
+                                                       (catch Exception e
+                                                         (debug "error sending telegram document:" e)
+                                                         e))))
                     (recur (<? S send-document))))
 
      [S peer [next-in prev-out]])))

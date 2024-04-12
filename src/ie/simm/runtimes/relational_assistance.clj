@@ -34,7 +34,7 @@
                 conn)
               (catch Exception _
                 (d/connect cfg)))]
-        #_(d/transact conn default-schema)
+        (d/transact conn default-schema)
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
@@ -244,9 +244,7 @@
         _ (tap mo out)
         pub-out (chan)
         _ (tap mo pub-out)
-        po (pub pub-out :type)
-
-        active-tags (atom nil)]
+        po (pub pub-out :type)]
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]
                  (when m
@@ -289,9 +287,7 @@
                                                        [?c :chat/id ?cid]]
                                                      @conn (:id chat))
                                                 window-size) 1)
-                                   (summarize S conn conv chat)
-                                   #_(reset! active-tags
-                                             (concat (<? S) [firstname])))
+                                   (summarize S conn conv chat))
 
 
                            ;; 3. retrieve summaries for active tags
@@ -338,7 +334,7 @@
                                        (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Removed issue: " title)))))))
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find issue: " title))))))))
 
-                               _ (when (.contains reply "LIST_ISSUES")
+                               _ (when (or (.contains reply "LIST_ISSUES") (.contains reply "DAILY"))
                                    (debug "listing issues")
                                    (let [issues (d/q '[:find [?t ...] :where [_ :issue/title ?t]] @conn)]
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
@@ -355,7 +351,7 @@
                                        (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Retrieved " title "\n" body)))))))
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find note: " title))))))))
 
-                               _ (when (or (.contains reply "LIST_NOTES") (.contains reply "DAILY"))
+                               _ (when (.contains reply "LIST_NOTES")
                                    (debug "listing notes")
                                    (let [issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Notes:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))

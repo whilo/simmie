@@ -5,7 +5,8 @@
             [clojure.core.async :refer [chan close!]]
             [ie.simm.towers :refer [default debug test-tower]]
             [nrepl.server :refer [start-server stop-server]]
-            [ie.simm.prompts :as pr])
+            [ie.simm.prompts :as pr]
+            [datahike.experimental.gc :as gc])
   (:gen-class))
 
 (defonce server (start-server :port 37888))
@@ -23,6 +24,7 @@
     (def chans [in out])
     (def peer (atom {}))
     (sasync/restarting-supervisor (fn [S] (go-try S ((debug) [S peer chans])))
+                                  :delay (* 10 1000)
                                   :log-fn (fn [level msg] (log/log level msg)))
     (log/info "Server started.")
     ;; HACK to block
@@ -33,7 +35,7 @@
   (close! (first chans))
 
   ;; pull above let into top level defs
-
+  
   (def in (chan))
 
   (def out (chan))
@@ -52,10 +54,14 @@
 
   (def conn ((:conn @peer) 79524334))
 
+  (require '[datahike.experimental.gc :as gc])
+
+  (gc/gc! @conn)
+
   (require '[clojure.java.io :as io])
 
   -4151611394 ;; Simulacion
-
+  
   (doseq [[t b] (d/q '[:find ?t ?b :where [?e :note/title ?t] [?e :note/body ?b]] @conn)]
     (println "#" t)
     (println b)
@@ -78,6 +84,23 @@
   (require '[superv.async :refer [<?? go-try S]]
            '[ie.simm.runtimes.openai :refer [chat]]
            '[ie.simm.prompts :as pr])
+
+;; parse instant from this string "2024-04-11T00:19:50.525695458Z"
+  (defn parse-instant [s]
+    (java.time.Instant/parse s))
+
+  (parse-instant "2024-04-11T00:19:50.525695458Z")
+
+  (str (java.time.Instant/now))
+
+  (java.time.Instant/parse
+   (chat "gpt-3.5-turbo-0125" (format "This is the time now: %s\nGiven the following message, return without comments the date time in the same format for the message. If you cannot figure the date out, return SKIP.\n%s\n\n"
+                                      (str (java.time.Instant/now))
+                                      "In a week at noon.")))
+
+  (chat "gpt-3.5-turbo-0125" (format "This is the time now: %s\nThis is the time given: %s\nRefer to the given time in words relative to now, e.g. 'Tomorrow at noon' or 'Next Monday at 2:30 pm.'.\n\n"
+                                     (str (java.time.Instant/now))
+                                     "2028-04-29T13:00:00Z"))
 
   (def summary (chat #_"gpt-3.5-turbo" "gpt-4-1106-preview" (format pr/summarization-prompt conv)))
 
@@ -120,7 +143,7 @@
 
 
   ;; inspect web hook
-
+  
   (require '[morse.api :as t]
            '[ie.simm.config :refer [config]]
            '[clj-http.client :as http])

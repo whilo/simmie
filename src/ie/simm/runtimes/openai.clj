@@ -8,7 +8,7 @@
             [taoensso.timbre :refer [debug warn]]
             [ie.simm.config :refer [config]]
             [clojure.core.async :refer [chan pub sub]]
-            [superv.async :refer [S go-loop-try <? put?]]
+            [superv.async :refer [S go-try go-loop-try <? put?]]
             [etaoin.api :as e]))
 
 (require-python '[openai :refer [OpenAI]])
@@ -17,8 +17,8 @@
 
 (def create (py.- (py.- (py.- client chat) completions) create))
 
-(def window-sizes {"gpt-3.5-turbo" 16384
-                   "gpt-4-1106-preview" 4096})
+(def window-sizes {"gpt-3.5-turbo-0125" 16384
+                   "gpt-4-turbo" 128000})
 
 (defn chat [model text]
   (if (>= (count text) (* 4 (window-sizes model)))
@@ -33,7 +33,7 @@
     (py.- (first (py.- res data)) url)))
 
 (comment 
-  (image-gen "dall-e-2" "a dog playing in a small house")
+  (image-gen "dall-e-3" "a dog playing in a small house")
   
   )
 
@@ -55,21 +55,21 @@
 (defn openai [[S peer [in out]]]
   (let [p (pub in (fn [{:keys [type]}]
                     (or ({:ie.simm.languages.gen-ai/cheap-llm ::gpt-35-turbo
-                          :ie.simm.languages.gen-ai/reasoner-llm ::gpt-4-1106-preview
+                          :ie.simm.languages.gen-ai/reasoner-llm ::gpt-4-turbo
                           :ie.simm.languages.gen-ai/stt-basic ::whisper-1
-                          :ie.simm.languages.gen-ai/image-gen ::dall-e-2} type)
+                          :ie.simm.languages.gen-ai/image-gen ::dall-e-3} type)
                         :unrelated)))
         gpt-35-turbo (chan)
         _ (sub p ::gpt-35-turbo gpt-35-turbo)
 
-        gpt-4-1106-preview (chan)
-        _ (sub p ::gpt-4-1106-preview gpt-4-1106-preview)
+        gpt-4-turbo (chan)
+        _ (sub p ::gpt-4-turbo gpt-4-turbo)
 
         whisper-1 (chan)
         _ (sub p ::whisper-1 whisper-1)
 
-        dall-e-2 (chan)
-        _ (sub p ::dall-e-2 dall-e-2)
+        dall-e-3 (chan)
+        _ (sub p ::dall-e-3 dall-e-3)
 
         next-in (chan)
         _ (sub p :unrelated next-in)]
@@ -77,30 +77,34 @@
     ;; TODO factor dedicated translator to LLM language
     (go-loop-try S [{[m] :args :as s} (<? S gpt-35-turbo)]
                  (when s
-                   (put? S out (assoc s
-                                      :type :ie.simm.languages.gen-ai/cheap-llm-reply
-                                      :response (try (chat "gpt-3.5-turbo" m) (catch Exception e e))))
+                   (go-try S
+                           (put? S out (assoc s
+                                              :type :ie.simm.languages.gen-ai/cheap-llm-reply
+                                              :response (try (chat "gpt-3.5-turbo-0125" m) (catch Exception e e)))))
                    (recur (<? S gpt-35-turbo))))
 
-    (go-loop-try S [{[m] :args :as s} (<? S gpt-4-1106-preview)]
+    (go-loop-try S [{[m] :args :as s} (<? S gpt-4-turbo)]
                  (when s
-                   (put? S out (assoc s
-                                      :type :ie.simm.languages.gen-ai/reasoner-llm-reply
-                                      :response (try (chat "gpt-4-1106-preview" m) (catch Exception e e))))
-                   (recur (<? S gpt-4-1106-preview))))
+                   (go-try S
+                           (put? S out (assoc s
+                                              :type :ie.simm.languages.gen-ai/reasoner-llm-reply
+                                              :response (try (chat "gpt-4-turbo" m) (catch Exception e e)))))
+                   (recur (<? S gpt-4-turbo))))
 
     (go-loop-try S [{[m] :args :as s} (<? S whisper-1)]
                  (when s
-                   (put? S out (assoc s
-                                      :type :ie.simm.languages.gen-ai/stt-basic-reply
-                                      :response (try (stt "whisper-1" m) (catch Exception e e))))
+                   (go-try S
+                           (put? S out (assoc s
+                                              :type :ie.simm.languages.gen-ai/stt-basic-reply
+                                              :response (try (stt "whisper-1" m) (catch Exception e e)))))
                    (recur (<? S whisper-1))))
 
-    (go-loop-try S [{[m] :args :as s} (<? S dall-e-2)]
+    (go-loop-try S [{[m] :args :as s} (<? S dall-e-3)]
                  (when s
-                   (put? S out (assoc s
-                                      :type :ie.simm.languages.gen-ai/image-gen-reply
-                                      :response (try (image-gen "dall-e-3" m) (catch Exception e e))))
-                   (recur (<? S dall-e-2))))
+                   (go-try S
+                           (put? S out (assoc s
+                                              :type :ie.simm.languages.gen-ai/image-gen-reply
+                                              :response (try (image-gen "dall-e-3" m) (catch Exception e e)))))
+                   (recur (<? S dall-e-3))))
 
     [S peer [next-in out]]))
