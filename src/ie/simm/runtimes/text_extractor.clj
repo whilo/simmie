@@ -30,7 +30,7 @@
 (defn extract-url [S text chat]
   (go-try S
           (if-let [;; if text matches http or https web URL extrect URL with regex
-                   url (re-find #"https?://\S+" text)]
+                   url (if text (re-find #"https?://\S+" text) "")]
             (if-let [;; extract youtube video id from URL
                      youtube-id (second (or (re-find #"youtube.com/watch\?v=([^&]+)" url)
                                             (re-find #"youtu.be/([^\?]+)" url)))]

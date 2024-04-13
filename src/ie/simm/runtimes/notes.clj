@@ -8,7 +8,7 @@
             [ie.simm.languages.browser :refer [extract-body]]
             [ie.simm.languages.chat :refer [send-text! send-photo! send-document!]]
             [ie.simm.prompts :as pr]
-            [ie.simm.db :refer [ensure-conn conversation extract-tags msg->txs window-size]]
+            [ie.simm.db :refer [ensure-conn conversation extract-links msg->txs window-size]]
             [superv.async :refer [<?? go-try S go-loop-try <? >? put? go-for] :as sasync]
             [clojure.core.async :refer [chan pub sub mult tap timeout] :as async]
             [taoensso.timbre :refer [debug info warn error]]
@@ -34,7 +34,7 @@
                               (sort-by first)
                               (take-last window-size)
                               (map second))
-                note-titles (extract-tags summarization)
+                note-titles (extract-links summarization)
                 _ (debug "=========================== CREATING NOTES ===============================")
                 new-notes
                 (<? S (async/into []
@@ -43,7 +43,7 @@
                                                    prompt (format pr/note note body summarization #_conv)
                                                    new-body (<? S (reasoner-llm prompt))]
                                              :when (not (.contains new-body "SKIP"))
-                                             :let [new-refs (extract-tags new-body)
+                                             :let [new-refs (extract-links new-body)
                                                    ref-ids (mapv first (d/q '[:find ?n
                                                                               :in $ [?t ...]
                                                                               :where
@@ -56,11 +56,11 @@
                                            :note/summary -1})))]
             (debug "=========================== STORING NOTES ===============================")
             (debug "Summarization:" summarization)
-            (debug "summarization tags" (extract-tags summarization))
+            (debug "summarization tags" (extract-links summarization))
             (d/transact conn (concat
                               [{:db/id -1
                                 :conversation/summary summarization
-                                :conversation/tag (extract-tags summarization)
+                                :conversation/tag (extract-links summarization)
                                 :conversation/message messages}]
                               new-notes))
                               ;; keep exports up to date
@@ -72,7 +72,7 @@
                 (with-open [w (io/writer f)]
                   (binding [*out* w]
                     (println b)))))
-            (extract-tags summarization))))
+            (extract-links summarization))))
 
 (defn zip-notes [chat-id]
   (let [zip-file (io/file (str "notes/" chat-id ".zip"))
@@ -149,14 +149,14 @@
                                relevant (<? S (cheap-llm (format "You are given the following tags in brackets [[some tag]]:\n\n%s\n\nList the most relevant tags for the following conversation with descending priority.\n\n%s"
                                                                  (str/join ", " (map #(str "[[" % "]]") all-tags))
                                                                  conv)))
-                               active-tags (concat (take 3 (extract-tags relevant)) [firstname])
+                               active-tags (concat (take 3 (extract-links relevant)) [firstname])
 
                                summaries (d/q '[:find ?t ?s
                                                 :in $ [?t ...]
                                                 :where
                                                 [?c :note/title ?t]
                                                 [?c :note/body ?s]]
-                                              @conn (concat active-tags (extract-tags conv)))
+                                              @conn (concat active-tags (extract-links conv)))
                                _ (debug "active tags" #_summaries active-tags)
 
                           ;; 4. derive reply

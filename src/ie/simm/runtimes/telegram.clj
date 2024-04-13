@@ -7,8 +7,6 @@
             [morse.handlers :as h]
             [morse.polling :as p]
             [clojure.core.async :refer [put! chan pub sub close! take!]]
-            [compojure.core :refer [routes POST]]
-            [compojure.route :as route]
             [jsonista.core :as json]
             [superv.async :refer [go-try S <? <?? go-loop-try put?]]
             [taoensso.timbre :refer [debug]]
@@ -21,45 +19,30 @@
 
 
 ;; TODO do not eagerly fetch the voice always, but only when needed from higher level language
-(defn fetch-voice! [{:keys [voice] :as msg}]
+(defn fetch-voice! [{:keys [voice chat] :as msg}]
   (if-not voice msg
           (assoc msg :voice-path
                  (let [{:keys [file_id]} voice
+                       {:keys [id]} chat
                        token (:telegram-bot-token config)
                        ;; this should happen at least asynchronously
                        file-path (-> (t/get-file token file_id)
                                      :result
                                      :file_path)
-                       local-path (str "downloads/telegram/" file-path ".oga")
+                       local-path (str "downloads/telegram/" id "/voice/" file-path ".oga")
                        _ (io/make-parents local-path)
                        _ (io/copy (:body (http/get (str "https://api.telegram.org/file/bot" token "/" file-path) {:as :byte-array}))
                                   (io/file local-path))]
                    local-path))))
 
 (defn server [peer in]
-  (let [telegram-routes (routes
-                         (POST "/telegram-callback" {body :body}
-                           (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)
-                                 _ (debug "received telegram message:" msg)
-                                 msg (fetch-voice! msg)
-                                 m {:type ::message
-                                    :request-id (uuid)
-                                    :msg msg}]
-                             (put? S in m)
-                             {:body "Thanks!"}))
-                         (route/not-found "Not Found"))
-        telegram-routes [["/telegram-callback" {:post 
+  (let [telegram-routes [["/telegram-callback" {:post 
                                                (fn [{:keys [body]}]
                                                  (let [msg (-> body slurp (json/read-value json/keyword-keys-object-mapper) :message)]
                                                    (debug "received telegram message:" msg)
                                                    (put? S in {:type ::message :request-id (uuid) :msg (fetch-voice! msg)})
-                                                   {:status 200 :body "Success."}))
-                                               #_{:parameters {:body [:map]}
-                                                      :responses  {200 {:body [:map]}}
-                                                      :handler    _}}]]
-        _ (debug "created telegram routes")
-        ;;server (run-jetty telegram-routes {:port 8080 :join? false})
-        ]
+                                                   {:status 200 :body "Success."}))}]]
+        _ (debug "created telegram routes") ]
     (swap! peer assoc-in [:http :routes :telegram] telegram-routes)
     #(fn [])))
 

@@ -42,12 +42,12 @@
    (map (fn [[d f l n t]] (str d " " f " " l " (" n "): " (str/replace t #"\n" " "))))
    (str/join "\n")))
 
-(defn extract-tags [text]
+(defn extract-links [text]
   (vec (distinct (map second (re-seq #"\[\[([^\[\]]+)\](\[.+\])?\]" text)))))
 
 (defn msg->txs [message]
   (let [{:keys [message_id from chat date text]} message
-        tags (when text (extract-tags text))]
+        tags (when text (extract-links text))]
     (vec
      (concat
       (when from
@@ -84,7 +84,7 @@
         (when text
           {:message/text text})
         (when (seq tags)
-          {:message/tag tags}))]))))
+          {:message/link tags}))]))))
 
 (def window-size 10)
 

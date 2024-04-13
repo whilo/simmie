@@ -8,7 +8,7 @@
             [ie.simm.languages.browser :refer [extract-body]]
             [ie.simm.languages.chat :refer [send-text! send-photo! send-document!]]
             [ie.simm.prompts :as pr]
-            [ie.simm.db :refer [ensure-conn conversation extract-tags msg->txs window-size]]
+            [ie.simm.db :refer [ensure-conn conversation extract-links msg->txs window-size]]
             [superv.async :refer [<?? go-try S go-loop-try <? >? put? go-for] :as sasync]
             [clojure.core.async :refer [chan pub sub mult tap timeout] :as async]
             [taoensso.timbre :refer [debug info warn error]]
@@ -16,7 +16,10 @@
             [hasch.core :refer [uuid]]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [etaoin.api :as e])
+            [hiccup.core :as h]
+            [nextjournal.markdown :as md]
+            [nextjournal.markdown.transform :as md.transform]
+            [nextjournal.markdown.parser :as md.parser])
   (:import [java.util.zip ZipEntry ZipOutputStream]))
 
 (defn summarize [S conn conv chat]
@@ -34,7 +37,7 @@
                               (sort-by first)
                               (take-last window-size)
                               (map second))
-                note-titles (extract-tags summarization)
+                note-titles (extract-links summarization)
                 _ (debug "=========================== CREATING NOTES ===============================")
                 new-notes
                 (<? S (async/into []
@@ -43,7 +46,7 @@
                                                    prompt (format pr/note note body summarization #_conv)
                                                    new-body (<? S (reasoner-llm prompt))]
                                              :when (not (.contains new-body "SKIP"))
-                                             :let [new-refs (extract-tags new-body)
+                                             :let [new-refs (extract-links new-body)
                                                    ref-ids (mapv first (d/q '[:find ?n
                                                                               :in $ [?t ...]
                                                                               :where
@@ -56,23 +59,23 @@
                                            :note/summary -1})))]
             (debug "=========================== STORING NOTES ===============================")
             (debug "Summarization:" summarization)
-            (debug "summarization tags" (extract-tags summarization))
+            (debug "summarization links" (extract-links summarization))
             (d/transact conn (concat
                               [{:db/id -1
                                 :conversation/summary summarization
-                                :conversation/tag (extract-tags summarization)
+                                :conversation/link (extract-links summarization)
                                 :conversation/message messages}]
                               new-notes))
                               ;; keep exports up to date
             (doseq [[t b] (map (fn [{:keys [note/title note/body]}] [title body]) new-notes)]
               (debug "writing note" t)
               ;; write to org file in notes/chat-id/title.org
-              (let [f (io/file (str "notes/" (:id chat) "/" t ".org"))]
+              (let [f (io/file (str "notes/" (:id chat) "/" t ".md"))]
                 (io/make-parents f)
                 (with-open [w (io/writer f)]
                   (binding [*out* w]
                     (println b)))))
-            (extract-tags summarization))))
+            (extract-links summarization))))
 
 (defn zip-notes [chat-id]
   (let [zip-file (io/file (str "notes/" chat-id ".zip"))
@@ -93,6 +96,8 @@
 
 
 (def base-url "https://ec2-34-218-223-7.us-west-2.compute.amazonaws.com")
+
+
 
 (defn assistance
   "This interpreter can derive facts and effects through a relational database."
@@ -119,22 +124,54 @@
         po (pub pub-out :type)
 
         ;; TODO figure out prefix, here conflict if notes/
-        routes [["/download/notes/:chat-id/notes.zip"
+        routes [["/download/chat/:chat-id/notes.zip"
                  {:get (fn [{{:keys [chat-id]} :path-params}]
                          {:status 200 :body (zip-notes chat-id)})}]
                 ["/notes/:chat-id"
                  {:get (fn [{{:keys [chat-id]} :path-params}]
                          ;; list the notes in basic HTML
-                         {:status 200
-                          :body (str "<html><body><h1>Notes</h1><a href=\"/download/notes/" chat-id "/notes.zip\">Download</a><ul>"
-                                     (str/join "" (map (fn [f] (str "<li><a href=\"/" f "\">" f "</a></li>"))
-                                                       (rest (file-seq (io/file (str "notes/" chat-id))))))
-                                     "</ul></body></html>")})}]
+                         (let [conn (ensure-conn peer chat-id)]
+                           {:status 200
+                            :body (h/html
+                                   [:html
+                                    [:head
+                                     [:meta {:charset "utf-8"}]
+                                     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+                                     [:link {:href "https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css" :rel "stylesheet" :type "text/css"}]
+                                     [:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
+                                     [:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
+                                     [:title "Notes"]
+                                     [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css"}]]
+                                    [:body
+                                     [:div {:class "flex"}
+                                      [:h1 "Notes"]
+                                      [:a {:href (str "/download/chat/" chat-id "/notes.zip")} "Download"]
+                                      [:ul (map (fn [[f]] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])
+                                                (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]]])}))}]
                 ;; access each individual node link as referenced above
                 ["/notes/:chat-id/:note"
                  {:get (fn [{{:keys [chat-id note]} :path-params}]
-                         {:status 200
-                          :body (slurp (io/file (str "notes/" chat-id "/" note)))})}]]]
+                         (let [conn (ensure-conn peer chat-id)
+                               body (:note/body (d/entity @conn [:note/title note]))]
+                           {:status 200
+                            :body
+                            (h/html
+                             [:html
+                              [:head
+                               [:meta {:charset "utf-8"}]
+                               [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+                               [:link {:href "https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css" :rel "stylesheet" :type "text/css"}]
+                               [:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
+                               [:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
+                               [:title note]
+                               [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css"}]]
+                              [:body
+                               [:div {:class "flex"}
+                                [:h1 note]
+                                (if (string? body)
+                                  (md.transform/->hiccup (md/parse (update md.parser/empty-doc :text-tokenizers concat [md.parser/internal-link-tokenizer md.parser/hashtag-tokenizer])
+                                                                   body))
+                                  "Note does not exist yet.")]]])}))}]]]
     (swap! peer assoc-in [:http :routes :assistance] routes)
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]
@@ -172,20 +209,20 @@
                                    (summarize S conn conv chat))
 
 
-                           ;; 3. retrieve summaries for active tags
-                               all-tags (d/q '[:find [?t ...] :where [_ :conversation/tag ?t]] @conn)
-                               relevant (<? S (cheap-llm (format "You are given the following tags in brackets [[some tag]]:\n\n%s\n\nList the most relevant tags for the following conversation with descending priority.\n\n%s"
-                                                                 (str/join ", " (map #(str "[[" % "]]") all-tags))
+                           ;; 3. retrieve summaries for active links
+                               all-links (d/q '[:find [?t ...] :where [_ :conversation/link ?t]] @conn)
+                               relevant (<? S (cheap-llm (format "You are given the following links in Wikipedia style brackets [[some entity]]:\n\n%s\n\nList the most relevant links for the following conversation with descending priority.\n\n%s"
+                                                                 (str/join ", " (map #(str "[[" % "]]") all-links))
                                                                  conv)))
-                               active-tags (concat (take 3 (extract-tags relevant)) [firstname])
+                               active-links (concat (take 3 (extract-links relevant)) [firstname])
 
                                summaries (d/q '[:find ?t ?s
                                                 :in $ [?t ...]
                                                 :where
                                                 [?c :note/title ?t]
                                                 [?c :note/body ?s]]
-                                              @conn (concat active-tags (extract-tags conv)))
-                               _ (debug "active tags" #_summaries active-tags)
+                                              @conn (concat active-links (extract-links conv)))
+                               _ (debug "active links" #_summaries active-links)
 
                           ;; 4. derive reply
                                assist-prompt (format pr/assistance
