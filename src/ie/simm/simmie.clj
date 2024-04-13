@@ -1,7 +1,7 @@
 (ns ie.simm.simmie
   (:require [taoensso.timbre :as log]
             [taoensso.timbre.appenders.core :as appenders]
-            [superv.async :refer [S go-try <? <??] :as sasync]
+            [superv.async :refer [S go-try <? <?? on-abort] :as sasync]
             [ie.simm.http :refer [ring-handler]]
             [ring.adapter.jetty :refer [run-jetty]]
             [clojure.core.async :refer [chan close!]]
@@ -30,8 +30,7 @@
                                                     (swap! peer assoc-in [:http :server] server)
                                                     (log/info "Server started.")
                                                     ;; this only unblocks on crash
-                                                    (<? S (chan))
-                                                    (.stop server))))
+                                                    (on-abort S (.stop server)))))
                                   :delay (* 10 1000)
                                   :log-fn (fn [level msg] (log/log level msg)))
     (log/info "Server started.")

@@ -111,7 +111,10 @@
                     (put? S next-in (assoc m
                                            :type :ie.simm.languages.chat/send-text-reply
                                            :response (try (t/send-text (:telegram-bot-token config) chat-id msg)
-                                                          (catch Exception e
+                                           ;; TODO bug in slingshot forces us to catch Throwable for HTTP errors, 
+                                           ;; https://github.com/scgilardi/slingshot/issues/60
+                                           ;; this can also be resolved by refactoring morse to be more lean
+                                                          (catch Throwable e
                                                             (debug "error sending telegram message:" e)
                                                             e))))
                     (recur (<? S send-text))))
@@ -123,7 +126,7 @@
                                            :type :ie.simm.languages.chat/send-photo-reply
                                            :response (try
                                                        (t/send-photo (:telegram-bot-token config) chat-id url)
-                                                       (catch Exception e
+                                                       (catch Throwable e
                                                          (debug "error sending telegram photo:" e)
                                                          e))))
                     (recur (<? S send-photo))))
@@ -135,7 +138,7 @@
                                            :type :ie.simm.languages.chat/send-document-reply
                                            :response (try
                                                        (t/send-document (:telegram-bot-token config) chat-id url)
-                                                       (catch Exception e
+                                                       (catch Throwable e
                                                          (debug "error sending telegram document:" e)
                                                          e))))
                     (recur (<? S send-document))))
