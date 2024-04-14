@@ -179,10 +179,13 @@
     (response 
      (default-chrome
       [:div {:class "container"}
-       [:div {:class "content"}
-        [:h1 {:class "title"} (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)]))
-                                  "Noname chat")]
-        [:div {:class "content"} "This is a chat overview."]]
+       [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
+        [:ul {}
+         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home" ]]]
+         [:li.is-active
+          [:a {:href (str "/notes/" chat-id)}
+           [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]]
+           [:span (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")]]]]]
        [:div {:class "container"}
         [:div.box
          [:h2 {:class "subtitle"} "Notes"]
@@ -223,12 +226,11 @@
     (response
      (default-chrome
       [:div {:class "container"}
-       [:div {:class "content"}
-        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
-         [:ul {} #_[:li [:p "Process"]]
-          [:li [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:a {:href "/#"} "Home"]]
-          [:li [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:a {:href (str "/notes/" chat-id)} (or chat-title "Noname chat")]]
-          [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} note]]]]]
+       [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
+        [:ul {} #_[:li [:p "Process"]]
+         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home"]]]
+         [:li [:a {:href (str "/notes/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
+         [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
        [:div {:class "box"}
         [:div {:id "note" :class "notification"}
          (when body [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}])
@@ -275,7 +277,6 @@
         id (or (:db/id (d/entity @conn [:note/title note])) (d/tempid :db.part/user))
         new-body (get params "note")
         links (extract-links new-body)]
-    (prn "links" links)
     (d/transact conn [(merge
                        {:db/id id
                         :note/title note
