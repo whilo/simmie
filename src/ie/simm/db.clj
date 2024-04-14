@@ -19,7 +19,7 @@
                 conn)
               (catch Exception _
                 (d/connect cfg)))]
-        #_(d/transact conn default-schema)
+        (d/transact conn default-schema)
         (swap! peer assoc-in [:conn chat-id] conn)
         conn)))
 
@@ -47,7 +47,8 @@
 
 (defn msg->txs [message]
   (let [{:keys [message_id from chat date text]} message
-        tags (when text (extract-links text))]
+        tags (when text (extract-links text))
+        url (when text (re-find #"https?://\S+" text))]
     (vec
      (concat
       (when from
@@ -81,6 +82,8 @@
          :message/from [:from/id (long (:id from))]
          :message/chat [:chat/id (long (:id chat))]
          :message/date (java.util.Date. (long (* 1000 date)))}
+        (when url
+          {:message/url url})
         (when text
           {:message/text text})
         (when (seq tags)

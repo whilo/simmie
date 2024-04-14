@@ -8,6 +8,7 @@
         metosin/reitit {:mvn/version "0.7.0-alpha7"}
         io.github.nextjournal/markdown {:mvn/version "0.5.148"}
         hiccup/hiccup {:mvn/version "2.0.0-RC3"}
+        org.clj-commons/hickory {:mvn/version "0.7.4"}
         ring/ring-jetty-adapter {:mvn/version "1.12.0"}
         etaoin/etaoin {:mvn/version "1.0.40"}
         missionary/missionary {:mvn/version "b.34"}

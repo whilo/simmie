@@ -16,7 +16,9 @@
             [hasch.core :refer [uuid]]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [hiccup.core :as h]
+            [hiccup2.core :as h]
+            [hiccup.page :as hp]
+            [hickory.core :as hk]
             [nextjournal.markdown :as md]
             [nextjournal.markdown.transform :as md.transform]
             [nextjournal.markdown.parser :as md.parser])
@@ -63,7 +65,6 @@
             (d/transact conn (concat
                               [{:db/id -1
                                 :conversation/summary summarization
-                                :conversation/link (extract-links summarization)
                                 :conversation/message messages}]
                               new-notes))
                               ;; keep exports up to date
@@ -94,10 +95,184 @@
     (.close zip-out)
     zip-file))
 
-
 (def base-url "https://ec2-34-218-223-7.us-west-2.compute.amazonaws.com")
 
+(def internal-link-tokenizer
+  (md.parser/normalize-tokenizer
+   {:regex #"\[\[([^\]]+)\](\[([^\]]+)\])?\]"
+    :handler (fn [match] {:type :internal-link
+                          :text (match 1)})}))
 
+(comment
+  ;; figure out separate extraction of link https://nextjournal.github.io/markdown/notebooks/parsing_extensibility/
+  (md.parser/tokenize-text-node internal-link-tokenizer {} {:text "some [[set]] of [[wiki][wiki]] link"})
+  )
+
+(def md-renderer
+  (assoc md.transform/default-hiccup-renderers
+        ;; :doc specify a custom container for the whole doc
+         :doc (partial md.transform/into-markup [:div.viewer-markdown])
+        ;; :text is funkier when it's zinc toned 
+         :text (fn [_ctx node] [:span {:style {:color "#71717a"}} (:text node)])
+        ;; :plain fragments might be nice, but paragraphs help when no reagent is at hand
+         :plain (partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
+
+         :formula (fn [ctx {:keys [text content]}] (str "$$" text "$$"))
+         #_(partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
+
+         :block-formula (fn [ctx {:keys [text content]}] (str "$$" text "$$"))
+        ;; :ruler gets to be funky, too
+         :ruler (constantly [:hr {:style {:border "2px dashed #71717a"}}])))
+
+(defn md-render [s]
+  (md.transform/->hiccup
+   md-renderer
+   (md/parse (update md.parser/empty-doc :text-tokenizers concat [internal-link-tokenizer md.parser/hashtag-tokenizer])
+             s)))
+
+(defn response [body & [status]]
+  {:status (or status 200)
+   :body (str (hp/html5 body))}) 
+
+(defn default-chrome [& body]
+  [:html
+   [:head
+    [:meta {:charset "utf-8"}]
+    [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
+    [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" :integrity "sha384-wcIxkf4k558AjM3Yz3BBFQUbk/zgIYC2R0QpeeYb+TwlBVMrlgLqwRjRtGZiK7ww" :crossorigin "anonymous"}]
+    [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" :integrity "sha384-hIoBPJpTUs74ddyc4bFZSM1TVlQDA60VBbJS0oA934VSz82sBx1X7kSx2ATBDIyd" :crossorigin "anonymous"}]
+    [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" :integrity "sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" :crossorigin "anonymous"
+              :onload "renderMathInElement(document.body);"}]
+    #_[:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
+    #_[:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
+    [:link {:rel "stylesheet" :href "https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css"}]
+    [:title "Notes"]
+    [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css"}]
+    [:script {:src "https://unpkg.com/htmx.org@1.9.11" :defer true}]
+    [:script {:src "https://unpkg.com/hyperscript.org@0.9.12" :defer true}] ]
+   [:body
+    [:section {:class "hero is-fullheight"}
+     [:div {:class "hero-head"}
+      [:header {:class "navbar theme-light"}
+       [:div {:class "container"}
+        [:div {:class "navbar-brand"}
+         [:a {:class "navbar-item" :href "/"}
+          [:img {:src "/simmie.png" :alt "Simmie logo"}]]
+         [:span {:class "navbar-burger" :data-target "navbarMenu"}
+          [:span]
+          [:span]
+          [:span]]]
+        [:div {:id "navbarMenu" :class "navbar-menu"}
+         [:div {:class "navbar-start"}
+          [:a {:class "navbar-item" :href "#"} "Home"]
+          [:a {:class "navbar-item" :href "#"} "Features"]
+          [:a {:class "navbar-item" :href "#"} "About"]]]]]]
+     (vec (concat [:div {:class "hero-body"}] body))
+     [:div {:class "hero-foot"}
+      [:footer {:class "footer"}
+       [:div {:class "content has-text-centered"}
+        [:p "Copyright © 2024 Christian Weilbach. All rights reserved."]]]]]]])
+
+(defn list-notes [peer {{:keys [chat-id]} :path-params}]
+                         ;; list the notes in basic HTML
+  (let [conn (ensure-conn peer chat-id)]
+    (response 
+     (default-chrome
+      [:div {:class "container"}
+       [:div {:class "content"}
+        [:h1 {:class "title"} (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)]))
+                                  "Noname chat")]
+        [:div {:class "box"} "This is a chat overview."]]
+       [:div {:class "container"}
+        [:div.box
+         [:h2 {:class "subtitle"} "Notes"]
+         [:div {:class "content"}
+          [:a {:class "button is-primary" :href (str "/download/chat/" chat-id "/notes.zip")} "Download"]]
+         [:section {:class "box"}
+         [:ul (map (fn [[f]] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])
+                   (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]] ]]))))
+
+(defn view-note [peer {{:keys [chat-id note]} :path-params}]
+  (let [conn (ensure-conn peer chat-id)
+        body (:note/body (d/entity @conn [:note/title note]))
+        chat-title (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)]))
+        summaries (->>
+                   (d/q '[:find ?s ?d ?t ?n ?f ?l
+                          :in $ ?note
+                          :where
+                          [?n :note/title ?note]
+                          [?n :note/summary ?c]
+                          [?c :conversation/summary ?s]
+                          [?c :conversation/message ?m]
+                          [?m :message/date ?d]
+                          [?m :message/text ?t]
+                          [?m :message/from ?u]
+                          [(get-else $ ?u :from/username "") ?n]
+                          [(get-else $ ?u :from/first_name "") ?f]
+                          [(get-else $ ?u :from/last_name "") ?l]]
+                        @conn note)
+                   (reduce (fn [m [s d t n f l]]
+                             (update m s (fnil conj []) [d t n f l]))
+                           {}))]
+    (response
+     (default-chrome
+      [:div {:class "container"}
+       [:div {:class "content"}
+       [:nav {:class "breadcrumb" :aria-label "breadcrumbs"} 
+        [:ul {} #_[:li [:p "Process"]]
+         [:li [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:a {:href "/#"} "Home"]]
+         [:li [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:a {:href (str "/notes/" chat-id)} (or chat-title "Noname chat")]]
+         [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} note]]]]]
+       [:div {:class "box"}
+        [:div {:id "note" :class "notification"}
+         (when body [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}])
+         (if body (md-render body) "Note does not exist yet.")]
+        [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]
+       (when (seq summaries)
+         [:div {:class "content"}
+          (for [[i [s ds]] (map (fn [i s] [i s]) (rest (range)) summaries)]
+            [:div {:class "box"}
+             [:div {:class "content"}
+              [:h3 (str i ". Source conversation")]
+              (md-render s)]
+             [:div.content
+              [:h3 "Message history"]
+              [:ul (for [[d t n f l] ds]
+                     [:li [:div {:class "content"}
+                           [:h6 (md-render (str "Message from [[" f " " l "]] (" n ") on " d))]
+                           (md-render t)]])]]])])]))))
+
+(defn edit-note [peer {{:keys [chat-id note]} :path-params}]
+  (let [conn (ensure-conn peer chat-id)
+        body (:note/body (d/entity @conn [:note/title note]))
+        edit? (get-in (swap! peer update-in [:transient chat-id note :edit] not) [:transient chat-id note :edit] false)]
+    (response
+     (if edit?
+       [:div {:id "note" :class "control"}
+        [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/notes/" chat-id "/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]]
+       (if (string? body)
+         [:div {:id "note" :class "notification"}
+          [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]
+          (md-render body)]
+         "Note does not exist yet.")))))
+
+(defn edited-note [peer {{:keys [chat-id note]} :path-params
+                         :keys [params]}]
+  (let [conn (ensure-conn peer chat-id)
+        id (or (:db/id (d/entity @conn [:note/title note])) (d/tempid :db.part/user))
+        new-body (get params "note")]
+    (d/transact conn [{:db/id id 
+                       :note/title note
+                       :note/body new-body}])
+    {:status 200
+     :body "Success."}))
+
+(defn delete-note [peer {{:keys [chat-id note]} :path-params
+                         :keys [params]}]
+  (let [conn (ensure-conn peer chat-id)]
+    (debug "Deleted note entity" (d/transact conn [[:db/retractEntity [:note/title note]]]))
+    (response [:div {:id "note" :class "notification"}
+               "Note does not exist yet."])))
 
 (defn assistance
   "This interpreter can derive facts and effects through a relational database."
@@ -124,54 +299,13 @@
         po (pub pub-out :type)
 
         ;; TODO figure out prefix, here conflict if notes/
-        routes [["/download/chat/:chat-id/notes.zip"
-                 {:get (fn [{{:keys [chat-id]} :path-params}]
-                         {:status 200 :body (zip-notes chat-id)})}]
-                ["/notes/:chat-id"
-                 {:get (fn [{{:keys [chat-id]} :path-params}]
-                         ;; list the notes in basic HTML
-                         (let [conn (ensure-conn peer chat-id)]
-                           {:status 200
-                            :body (h/html
-                                   [:html
-                                    [:head
-                                     [:meta {:charset "utf-8"}]
-                                     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
-                                     [:link {:href "https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css" :rel "stylesheet" :type "text/css"}]
-                                     [:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
-                                     [:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
-                                     [:title "Notes"]
-                                     [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css"}]]
-                                    [:body
-                                     [:div {:class "flex"}
-                                      [:h1 "Notes"]
-                                      [:a {:href (str "/download/chat/" chat-id "/notes.zip")} "Download"]
-                                      [:ul (map (fn [[f]] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])
-                                                (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]]])}))}]
-                ;; access each individual node link as referenced above
-                ["/notes/:chat-id/:note"
-                 {:get (fn [{{:keys [chat-id note]} :path-params}]
-                         (let [conn (ensure-conn peer chat-id)
-                               body (:note/body (d/entity @conn [:note/title note]))]
-                           {:status 200
-                            :body
-                            (h/html
-                             [:html
-                              [:head
-                               [:meta {:charset "utf-8"}]
-                               [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
-                               [:link {:href "https://cdn.jsdelivr.net/npm/katex@0.13.13/dist/katex.min.css" :rel "stylesheet" :type "text/css"}]
-                               [:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
-                               [:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
-                               [:title note]
-                               [:link {:rel "stylesheet" :href "https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css"}]]
-                              [:body
-                               [:div {:class "flex"}
-                                [:h1 note]
-                                (if (string? body)
-                                  (md.transform/->hiccup (md/parse (update md.parser/empty-doc :text-tokenizers concat [md.parser/internal-link-tokenizer md.parser/hashtag-tokenizer])
-                                                                   body))
-                                  "Note does not exist yet.")]]])}))}]]]
+        routes [["/download/chat/:chat-id/notes.zip" {:get (fn [{{:keys [chat-id]} :path-params}] {:status 200 :body (zip-notes chat-id)})}]
+                ["/notes/:chat-id" {:get (partial #'list-notes peer)}]
+                ;; access each individual note link as referenced above
+                ["/notes/:chat-id/:note" {:get (partial #'view-note peer)}]
+                ["/notes/:chat-id/:note/edit" {:post (partial #'edit-note peer)}]
+                ["/notes/:chat-id/:note/edited" {:post (partial #'edited-note peer)}]
+                ["/notes/:chat-id/:note/delete" {:post (partial #'delete-note peer)}]]]
     (swap! peer assoc-in [:http :routes :assistance] routes)
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]

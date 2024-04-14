@@ -60,7 +60,7 @@
             (d/transact conn (concat
                               [{:db/id -1
                                 :conversation/summary summarization
-                                :conversation/tag (extract-links summarization)
+                                :conversation/link (extract-links summarization)
                                 :conversation/message messages}]
                               new-notes))
                               ;; keep exports up to date

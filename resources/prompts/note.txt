@@ -2,7 +2,7 @@ Title: %s
 Body:%s
 
 
-Given the note above on the subect, update it in light of the following conversation summary and return the new note body only. References to entities (events, places, people, organisations, businesses, academic topics, everyday topics, etc.) are syntactically expressed as Wikipedia style internal links with double brackets, e.g. [[peter][my friend peter]] or [[peter]]. Make sure you retain these references. Be brief and succinct while keeping important facts, focus on the topic of the title *only* and rely on the references for the rest of the context to be provided in these notes. Use Markdown with LaTeX support for formulas. Make full use of Markdown to lay out the note well, but prefer nested lists of bullet points to paragraphs. If you do not want to update the note, write SKIP.
+Given the note above on the subect, update it in light of the following conversation summary and return the new note body only. References to entities (events, places, people, organisations, businesses, academic topics, everyday topics, etc.) are syntactically expressed as Wikipedia style internal links with double brackets, e.g. [[peter][my friend peter]] or just [[peter]]. Make sure you retain these references. Be brief and succinct while keeping important facts, focus on the topic of the title *only* and rely on the references for the rest of the context to be provided in these notes. Use Markdown with LaTeX support for formulas. Make full use of Markdown to lay out the note well, but prefer nested lists of bullet points to paragraphs. If you do not want to update the note, write SKIP.
 
 %s
 

@@ -57,6 +57,9 @@
  {:db/ident :message/text
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/one}
+ {:db/ident :message/url
+  :db/valueType :db.type/string
+  :db/cardinality :db.cardinality/many}
  {:db/ident :message/link
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/many}
@@ -80,9 +83,6 @@
  {:db/ident :conversation/summary
   :db/valueType :db.type/string
   :db/cardinality :db.cardinality/one}
- {:db/ident :conversation/link
-  :db/valueType :db.type/string
-  :db/cardinality :db.cardinality/many}
  {:db/ident :conversation/message
   :db/valueType :db.type/ref
   :db/cardinality :db.cardinality/many}
