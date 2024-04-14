@@ -182,15 +182,14 @@
        [:div {:class "content"}
         [:h1 {:class "title"} (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)]))
                                   "Noname chat")]
-        [:div {:class "box"} "This is a chat overview."]]
+        [:div {:class "content"} "This is a chat overview."]]
        [:div {:class "container"}
         [:div.box
          [:h2 {:class "subtitle"} "Notes"]
          [:div {:class "content"}
           [:a {:class "button is-primary" :href (str "/download/chat/" chat-id "/notes.zip")} "Download"]]
-         [:section {:class "box"}
          [:ul (map (fn [[f]] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])
-                   (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]] ]]))))
+                   (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]]]))))
 
 (defn view-note [peer {{:keys [chat-id note]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -213,21 +212,35 @@
                         @conn note)
                    (reduce (fn [m [s d t n f l]]
                              (update m s (fnil conj []) [d t n f l]))
-                           {}))]
+                           {}))
+        linking-notes (d/q '[:find ?lt
+                             :in $ ?t
+                             :where
+                             [?n :note/title ?t]
+                             [?l :note/link ?n]
+                             [?l :note/title ?lt]]
+                           @conn note)]
     (response
      (default-chrome
       [:div {:class "container"}
        [:div {:class "content"}
-       [:nav {:class "breadcrumb" :aria-label "breadcrumbs"} 
-        [:ul {} #_[:li [:p "Process"]]
-         [:li [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:a {:href "/#"} "Home"]]
-         [:li [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:a {:href (str "/notes/" chat-id)} (or chat-title "Noname chat")]]
-         [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} note]]]]]
+        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
+         [:ul {} #_[:li [:p "Process"]]
+          [:li [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:a {:href "/#"} "Home"]]
+          [:li [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:a {:href (str "/notes/" chat-id)} (or chat-title "Noname chat")]]
+          [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} note]]]]]
        [:div {:class "box"}
         [:div {:id "note" :class "notification"}
          (when body [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}])
          (if body (md-render body) "Note does not exist yet.")]
         [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]
+       (when (seq linking-notes)
+         [:div {:class "box"}
+          [:div {:class "content"}
+           [:h3 "Pointing to this note"]
+           (for [[ln] linking-notes]
+             [:div {:class "content"}
+              [:a {:href (str "/notes/" chat-id "/" ln)} ln]])]])
        (when (seq summaries)
          [:div {:class "content"}
           (for [[i [s ds]] (map (fn [i s] [i s]) (rest (range)) summaries)]
@@ -260,10 +273,15 @@
                          :keys [params]}]
   (let [conn (ensure-conn peer chat-id)
         id (or (:db/id (d/entity @conn [:note/title note])) (d/tempid :db.part/user))
-        new-body (get params "note")]
-    (d/transact conn [{:db/id id 
-                       :note/title note
-                       :note/body new-body}])
+        new-body (get params "note")
+        links (extract-links new-body)]
+    (prn "links" links)
+    (d/transact conn [(merge
+                       {:db/id id
+                        :note/title note
+                        :note/body new-body}
+                       (when (seq links)
+                         {:note/link (mapv first (d/q '[:find ?n :in $ [?t ...] :where [?n :note/title ?t]] @conn links))}))])
     {:status 200
      :body "Success."}))
 
