@@ -65,6 +65,7 @@
             (d/transact conn (concat
                               [{:db/id -1
                                 :conversation/summary summarization
+                                :conversation/date (java.util.Date.)
                                 :conversation/message messages}]
                               new-notes))
                               ;; keep exports up to date
@@ -113,7 +114,7 @@
         ;; :doc specify a custom container for the whole doc
          :doc (partial md.transform/into-markup [:div.viewer-markdown])
         ;; :text is funkier when it's zinc toned 
-         :text (fn [_ctx node] [:span {:style {:color "#71717a"}} (:text node)])
+         :text (fn [_ctx node] [:span #_{:style {:color "#71717a"}} (:text node)])
         ;; :plain fragments might be nice, but paragraphs help when no reagent is at hand
          :plain (partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
 
@@ -121,8 +122,10 @@
          #_(partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
 
          :block-formula (fn [ctx {:keys [text content]}] (str "$$" text "$$"))
+         ;:link (fn [ctx {:as node :keys [attrs]}] (md.transform/into-markup [:a {:href (:href attrs)}] ctx node))
         ;; :ruler gets to be funky, too
-         :ruler (constantly [:hr {:style {:border "2px dashed #71717a"}}])))
+        ; :ruler (constantly [:hr {:style {:border "2px dashed #71717a"}} ])
+         ))
 
 (defn md-render [s]
   (md.transform/->hiccup
@@ -134,7 +137,7 @@
   {:status (or status 200)
    :body (str (hp/html5 body))}) 
 
-(defn default-chrome [& body]
+(defn default-chrome [title & body]
   [:html
    [:head
     [:meta {:charset "utf-8"}]
@@ -143,13 +146,12 @@
     [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" :integrity "sha384-hIoBPJpTUs74ddyc4bFZSM1TVlQDA60VBbJS0oA934VSz82sBx1X7kSx2ATBDIyd" :crossorigin "anonymous"}]
     [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" :integrity "sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" :crossorigin "anonymous"
               :onload "renderMathInElement(document.body);"}]
-    #_[:link {:href "https://fonts.bunny.net" :rel "preconnect"}]
-    #_[:link {:href "https://fonts.bunny.net/css?family=fira-mono:400,700%7Cfira-sans:400,400i,500,500i,700,700i%7Cfira-sans-condensed:700,700i%7Cpt-serif:400,400i,700,700i" :rel "stylesheet" :type "text/css"}]
     [:link {:rel "stylesheet" :href "https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css"}]
-    [:title "Notes"]
     [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css"}]
     [:script {:src "https://unpkg.com/htmx.org@1.9.11" :defer true}]
-    [:script {:src "https://unpkg.com/hyperscript.org@0.9.12" :defer true}] ]
+    [:script {:src "https://unpkg.com/hyperscript.org@0.9.12" :defer true}]
+   
+    [:title title]]
    [:body
     [:section {:class "hero is-fullheight"}
      [:div {:class "hero-head"}
@@ -175,24 +177,37 @@
 
 (defn list-notes [peer {{:keys [chat-id]} :path-params}]
                          ;; list the notes in basic HTML
-  (let [conn (ensure-conn peer chat-id)]
+  (let [conn (ensure-conn peer chat-id)
+        title (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")]
     (response 
-     (default-chrome
+     (default-chrome title
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {}
-         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home" ]]]
+         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home"]]]
          [:li.is-active
           [:a {:href (str "/notes/" chat-id)}
            [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]]
-           [:span (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")]]]]]
+           [:span title]]]]]
+       [:div.content "This chat has no description yet."]
        [:div {:class "container"}
-        [:div.box
-         [:h2 {:class "subtitle"} "Notes"]
-         [:div {:class "content"}
-          [:a {:class "button is-primary" :href (str "/download/chat/" chat-id "/notes.zip")} "Download"]]
-         [:ul (map (fn [[f]] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])
-                   (d/q '[:find ?t :where [?n :note/title ?t]] @conn))]]]]))))
+        [:h3 {:class "title is-3 is-spaced" :id "bots"}
+         [:a {:class "" :href "bots"} "# "]
+         [:span {:class ""} "Bots"]]
+        [:div {:class "content"}
+         [:p "Here be dragons."]]]
+       [:div {:class "container"}
+        [:h3 {:class "title is-3 is-spaced" :id "notes"}
+         [:a {:class "" :href "notes"} "# "]
+         [:span {:class ""} "Notes "]
+         [:a {:class "button is-primary" :href (str "/download/chat/" chat-id "/notes.zip")}
+          [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]]]]
+        [:div {:class "content"}
+         [:ul 
+         (->> (d/q '[:find ?t :where [?n :note/title ?t]] @conn)
+              (map first)
+              sort
+              (map (fn [f] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])))]]]]))))
 
 (defn view-note [peer {{:keys [chat-id note]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -224,34 +239,41 @@
                              [?l :note/title ?lt]]
                            @conn note)]
     (response
-     (default-chrome
+     (default-chrome note
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {} #_[:li [:p "Process"]]
          [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home"]]]
          [:li [:a {:href (str "/notes/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
          [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
-       [:div {:class "box"}
-        [:div {:id "note" :class "notification"}
-         (when body [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}])
-         (if body (md-render body) "Note does not exist yet.")]
-        [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]
+       [:article {:id "note" :class "message"}
+        [:div {:class "message-header"}
+         [:p note]
+         [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]]
+        [:div {:class "message-body"}
+         (if body (md-render body) "Note does not exist yet.")
+         [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]]
        (when (seq linking-notes)
-         [:div {:class "box"}
-          [:div {:class "content"}
-           [:h3 "Pointing to this note"]
-           (for [[ln] linking-notes]
-             [:div {:class "content"}
-              [:a {:href (str "/notes/" chat-id "/" ln)} ln]])]])
+         [:div {:class "content"}
+          [:h4 {:class "title is-4 is-spaced" :id "incoming-pointers"}
+           [:a {:class "" :href "incoming-pointers"} "# "]
+           [:span {:class ""} "Pointing to this note"]]
+          (for [[ln] linking-notes]
+            [:div {:class "content"}
+             [:a {:href (str "/notes/" chat-id "/" ln)} ln]])])
        (when (seq summaries)
          [:div {:class "content"}
           (for [[i [s ds]] (map (fn [i s] [i s]) (rest (range)) summaries)]
-            [:div {:class "box"}
-             [:div {:class "content"}
-              [:h3 (str i ". Source conversation")]
+            [:div {:class "content"}
+             [:div.content
+              [:h4 {:class "title is-4 is-spaced" :id (str i "-source")}
+               [:a {:class "" :href (str "#" i "-source")} "# "]
+               [:span {:class ""} (str i ". Source conversation")]]
               (md-render s)]
              [:div.content
-              [:h3 "Message history"]
+              [:h4 {:class "title is-4 is-spaced" :id "message-history"}
+               [:a {:class "" :href "#message-history"} "# "]
+               [:span {:class ""}  "Message history"]]
               [:ul (for [[d t n f l] ds]
                      [:li [:div {:class "content"}
                            [:h6 (md-render (str "Message from [[" f " " l "]] (" n ") on " d))]
@@ -262,14 +284,15 @@
         body (:note/body (d/entity @conn [:note/title note]))
         edit? (get-in (swap! peer update-in [:transient chat-id note :edit] not) [:transient chat-id note :edit] false)]
     (response
-     (if edit?
-       [:div {:id "note" :class "control"}
-        [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/notes/" chat-id "/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]]
-       (if (string? body)
-         [:div {:id "note" :class "notification"}
-          [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]
-          (md-render body)]
-         "Note does not exist yet.")))))
+     [:article {:id "note" :class "message"}
+      [:div {:class "message-header"}
+       [:p note]
+       [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]]
+      [:div {:class "message-body"}
+       (if edit?
+         [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/notes/" chat-id "/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]
+         (if body (md-render body) "Note does not exist yet."))
+       [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]])))
 
 (defn edited-note [peer {{:keys [chat-id note]} :path-params
                          :keys [params]}]

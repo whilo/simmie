@@ -86,6 +86,9 @@
  {:db/ident :conversation/message
   :db/valueType :db.type/ref
   :db/cardinality :db.cardinality/many}
+ {:db/ident :conversation/date
+  :db/valueType :db.type/instant
+  :db/cardinality :db.cardinality/one}
 
  {:db/ident :note/title
   :db/valueType :db.type/string
