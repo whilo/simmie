@@ -175,7 +175,7 @@
        [:div {:class "content has-text-centered"}
         [:p "Copyright © 2024 Christian Weilbach. All rights reserved."]]]]]]])
 
-(defn list-notes [peer {{:keys [chat-id]} :path-params}]
+(defn chat-overview [peer {{:keys [chat-id]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
         title (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")]
     (response 
@@ -194,24 +194,26 @@
          [:a {:class "" :href "bots"} "# "]
          [:span {:class ""} "Agents and Processes"]]
         [:div {:class "content"}
-         [:p "Human-like agents are running in the background to assist you. They are able to answer questions, collaborate, provide summaries, and help you with your tasks. They are also able to learn from your interactions and improve over time. There are also simpler processes that can be triggered by certain keywords or commands."]]
+         [:p "Human-like agents are running in the background to assist you. They are able to answer questions, collaborate, provide summaries, and help you with your tasks. They are also able to learn from your interactions and improve over time. There are also simpler processes that can be triggered by certain keywords or commands. They are also called bots in some contexts."]]
         [:div {:class "container"}
-         [:h3 {:class "title is-3 is-spaced" :id "note-taker"}
-          [:a {:class "" :href "note-taker"} "# "]
-          [:span {:class ""} "Note-taker"]]
-         [:p "The note-taker is a simple note-taking system that allows you to keep track of important information and conversations. You can create new notes, edit existing ones, and link them together. The note-taker will also automatically summarize conversations and create new notes for you."]
          [:div.content
-          [:h4 {:class "title is-4 is-spaced" :id "notes"}
-           [:a {:class "" :href "notes"} "# "]
-           [:span {:class ""} "Notes"]]
-          [:p "These are all notes that have been created in this chat. You can click on a note to view its content, edit it, or delete it. You can also download all notes as a zip file."]
-          [:a {:class "button" :href (str "/download/chat/" chat-id "/notes.zip")} [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]] [:span "Download"]]
-          [:div {:class "content"}
-           [:ul
-            (->> (d/q '[:find ?t :where [?n :note/title ?t]] @conn)
-                 (map first)
-                 sort
-                 (map (fn [f] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])))]]]]]]))))
+          [:h3 {:class "title is-3 is-spaced" :id "note-taker"}
+           [:a {:class "" :href "note-taker"} "# "]
+           [:span {:class ""} "Note-taker"]]
+          [:p "The note-taker is a simple note-taking system that allows you to keep track of important information and conversations. You can create new notes, edit existing ones, and link them together. The note-taker will also automatically summarize conversations and create new notes for you."]
+          [:div.container
+           [:div.content
+            [:h4 {:class "title is-4 is-spaced" :id "notes"}
+             [:a {:class "" :href "notes"} "# "]
+             [:span {:class ""} "Notes"]]
+            [:p "These are all notes that have been created in this chat. You can click on a note to view its content, edit it, or delete it. You can also download all notes as a zip file."]
+            [:a {:class "button" :href (str "/download/chat/" chat-id "/notes.zip")} [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]] [:span "Download"]]
+            [:div {:class "content"}
+             [:ul
+              (->> (d/q '[:find ?t :where [?n :note/title ?t]] @conn)
+                   (map first)
+                   sort
+                   (map (fn [f] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])))]]]]]]]]))))
 
 (defn view-note [peer {{:keys [chat-id note]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -346,7 +348,7 @@
 
         ;; TODO figure out prefix, here conflict if notes/
         routes [["/download/chat/:chat-id/notes.zip" {:get (fn [{{:keys [chat-id]} :path-params}] {:status 200 :body (zip-notes chat-id)})}]
-                ["/notes/:chat-id" {:get (partial #'list-notes peer)}]
+                ["/notes/:chat-id" {:get (partial #'chat-overview peer)}]
                 ;; access each individual note link as referenced above
                 ["/notes/:chat-id/:note" {:get (partial #'view-note peer)}]
                 ["/notes/:chat-id/:note/edit" {:post (partial #'edit-note peer)}]
