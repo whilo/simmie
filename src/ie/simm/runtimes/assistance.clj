@@ -155,7 +155,7 @@
    [:body
     [:section {:class "hero is-fullheight"}
      [:div {:class "hero-head"}
-      [:header {:class "navbar theme-light"}
+      [:header {:class "navbar"}
        [:div {:class "container"}
         [:div {:class "navbar-brand"}
          [:a {:class "navbar-item" :href "/"}
@@ -200,7 +200,7 @@
         [:h3 {:class "title is-3 is-spaced" :id "notes"}
          [:a {:class "" :href "notes"} "# "]
          [:span {:class ""} "Notes "]
-         [:a {:class "button is-primary" :href (str "/download/chat/" chat-id "/notes.zip")}
+         [:a {:class "button" :href (str "/download/chat/" chat-id "/notes.zip")}
           [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]]]]
         [:div {:class "content"}
          [:ul 
@@ -274,7 +274,7 @@
               [:h4 {:class "title is-4 is-spaced" :id "message-history"}
                [:a {:class "" :href "#message-history"} "# "]
                [:span {:class ""}  "Message history"]]
-              [:ul (for [[d t n f l] ds]
+              [:ul (for [[d t n f l] (sort-by first ds)]
                      [:li [:div {:class "content"}
                            [:h6 (md-render (str "Message from [[" f " " l "]] (" n ") on " d))]
                            (md-render t)]])]]])])]))))
