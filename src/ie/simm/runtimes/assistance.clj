@@ -21,8 +21,21 @@
             [hickory.core :as hk]
             [nextjournal.markdown :as md]
             [nextjournal.markdown.transform :as md.transform]
-            [nextjournal.markdown.parser :as md.parser])
+            [nextjournal.markdown.parser :as md.parser]
+            [clojure.test :as ct])
   (:import [java.util.zip ZipEntry ZipOutputStream]))
+
+(comment
+ ;; idealized version of the following summarize function
+
+;; implicit let
+  (let [conv (conversation window-size)
+        summarization (reasoner-llm (fill-in prompts/summarization conv))
+        _ (add-summarization! summarization)
+        notes (extract-notes summarization)
+        _ (for [note notes]
+            (update-note! (reasoner-llm (fill-in prompts/note note summarization conv))))])
+  )
 
 (defn summarize [S conn conv chat]
   (go-try S
@@ -45,7 +58,7 @@
                 (<? S (async/into []
                                   (go-for S [[i note] (partition 2 (interleave (iterate inc 2) note-titles))
                                              :let [[nid body] (first (d/q '[:find ?n ?b :in $ ?t :where [?n :note/title ?t] [(get-else $ ?n :note/body "EMPTY") ?b]] db note))
-                                                   prompt (format pr/note note body summarization #_conv)
+                                                   prompt (format pr/note note body #_summarization conv)
                                                    new-body (<? S (reasoner-llm prompt))]
                                              :when (not (.contains new-body "SKIP"))
                                              :let [new-refs (extract-links new-body)
@@ -71,8 +84,8 @@
                               ;; keep exports up to date
             (doseq [[t b] (map (fn [{:keys [note/title note/body]}] [title body]) new-notes)]
               (debug "writing note" t)
-              ;; write to org file in notes/chat-id/title.org
-              (let [f (io/file (str "notes/" (:id chat) "/" t ".md"))]
+              ;; write to org file in chats/chat-id/title.org
+              (let [f (io/file (str "chats/" (:id chat) "/" t ".md"))]
                 (io/make-parents f)
                 (with-open [w (io/writer f)]
                   (binding [*out* w]
@@ -80,10 +93,10 @@
             (extract-links summarization))))
 
 (defn zip-notes [chat-id]
-  (let [zip-file (io/file (str "notes/" chat-id ".zip"))
+  (let [zip-file (io/file (str "chats/" chat-id ".zip"))
         zip-out (io/output-stream zip-file)
         zip (ZipOutputStream. zip-out)
-        notes-dir (io/file (str "notes/" chat-id))
+        notes-dir (io/file (str "chats/" chat-id))
         _ (io/make-parents notes-dir)
         _ (io/make-parents zip-file)
         _ (doseq [f (rest (file-seq notes-dir))]
@@ -113,8 +126,9 @@
   (assoc md.transform/default-hiccup-renderers
         ;; :doc specify a custom container for the whole doc
          :doc (partial md.transform/into-markup [:div.viewer-markdown])
+
         ;; :text is funkier when it's zinc toned 
-         :text (fn [_ctx node] [:span #_{:style {:color "#71717a"}} (:text node)])
+        ;; :text (fn [_ctx node] [:span #_{:style {:color "#71717a"}} (:text node)])
         ;; :plain fragments might be nice, but paragraphs help when no reagent is at hand
          :plain (partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
 
@@ -177,15 +191,18 @@
 
 (defn chat-overview [peer {{:keys [chat-id]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
-        title (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")]
+        title (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")
+        notes (->> (d/q '[:find ?t :where [?n :note/title ?t]] @conn)
+                   (map first)
+                   sort)]
     (response 
      (default-chrome title
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {}
-         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home"]]]
+         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Chats"]]]
          [:li.is-active
-          [:a {:href (str "/notes/" chat-id)}
+          [:a {:href (str "/chats/" chat-id)}
            [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]]
            [:span title]]]]]
        [:div.content "This chat has no description yet."]
@@ -209,11 +226,28 @@
             [:p "These are all notes that have been created in this chat. You can click on a note to view its content, edit it, or delete it. You can also download all notes as a zip file."]
             [:a {:class "button" :href (str "/download/chat/" chat-id "/notes.zip")} [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]] [:span "Download"]]
             [:div {:class "content"}
-             [:ul
-              (->> (d/q '[:find ?t :where [?n :note/title ?t]] @conn)
-                   (map first)
-                   sort
-                   (map (fn [f] [:li [:a {:href (str "/notes/" chat-id "/" f)} f]])))]]]]]]]]))))
+            (if (seq notes)
+             [:ul (map (fn [f] [:li [:a {:href (str "/chats/" chat-id "/notes/" f)} f]]) notes)]
+              "No notes.")]]]]]
+        [:div.container
+         [:div.content
+          [:h3 {:class "title is-3 is-spaced" :id "issue-tracker"}
+           [:a {:class "" :href "issue-tracker"} "# "]
+           [:span {:class ""} "Issue tracker"]]
+          [:div.content
+           [:p "The issue tracker is a simple system that allows you to keep track of tasks, bugs, and other issues. you can create new issues, assign them to people, set priorities, and schedule them. the issue tracker will also automatically remind you of upcoming deadlines in the chat and help you to stay organized."]]
+          [:div.container
+           [:div.content
+            [:h4 {:class "title is-4 is-spaced" :id "issues"}
+             [:a {:class "" :href "issues"} "# "]
+             [:span {:class ""} "Issues"]]
+            (let [issues (->> (d/q '[:find ?t :where [?i :issue/title ?t]] @conn)
+                              (map first)
+                              sort)]
+              (if (seq issues)
+                [:ul
+                 (map (fn [f] [:li [:a {:href (str "/chats/" chat-id "/issues/" f)} f]]) issues)]
+                "No issues."))]]]]]]))))
 
 (defn view-note [peer {{:keys [chat-id note]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -249,16 +283,16 @@
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {} #_[:li [:p "Process"]]
-         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Home"]]]
-         [:li [:a {:href (str "/notes/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
-         [:li.is-active [:a {:href (str "/notes/" chat-id "/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
+         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Chats"]]]
+         [:li [:a {:href (str "/chats/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
+         [:li.is-active [:a {:href (str "/chats/" chat-id "/notes/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
        [:article {:id "note" :class "message"}
         [:div {:class "message-header"}
          [:p note]
-         [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]]
-        [:div {:class "message-body"}
+         [:button {:class "delete" :hx-post (str "/chats/" chat-id "/notes/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?" :hx-swap "outerHTML"}]]
+        [:div {:class "message-body content"}
          (if body (md-render body) "Note does not exist yet.")
-         [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]]
+         [:button {:class "button is-primary" :hx-post (str "/chats/" chat-id "/notes/" note "/edit") :hx-target "#note" :hx-trigger "click" :hx-swap "outerHTML"} "Edit"]]]
        (when (seq linking-notes)
          [:div {:class "content"}
           [:h4 {:class "title is-4 is-spaced" :id "incoming-pointers"}
@@ -266,7 +300,7 @@
            [:span {:class ""} "Pointing to this note"]]
           (for [[ln] linking-notes]
             [:div {:class "content"}
-             [:a {:href (str "/notes/" chat-id "/" ln)} ln]])])
+             [:a {:href (str "/chats/" chat-id "/notes/" ln)} ln]])])
        (when (seq summaries)
          [:div {:class "content"}
           (for [[i [s ds]] (map (fn [i s] [i s]) (rest (range)) summaries)]
@@ -293,12 +327,12 @@
      [:article {:id "note" :class "message"}
       [:div {:class "message-header"}
        [:p note]
-       [:button {:class "delete" :hx-post (str "/notes/" chat-id "/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?"}]]
-      [:div {:class "message-body"}
+       [:button {:class "delete" :hx-post (str "/chats/" chat-id "/notes/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-swap "outerHTML" :hx-confirm "Are you sure you want to delete this note?"}]]
+      [:div {:class "message-body content"}
        (if edit?
-         [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/notes/" chat-id "/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]
+         [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/chats/" chat-id "/notes/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]
          (if body (md-render body) "Note does not exist yet."))
-       [:button {:class "button is-primary" :hx-post (str "/notes/" chat-id "/" note "/edit") :hx-target "#note" :hx-trigger "click"} "Edit"]]])))
+       [:button {:class "button is-primary" :hx-post (str "/chats/" chat-id "/notes/" note "/edit") :hx-target "#note" :hx-swap "outerHTML" :hx-trigger "click"} "Edit"]]])))
 
 (defn edited-note [peer {{:keys [chat-id note]} :path-params
                          :keys [params]}]
@@ -346,14 +380,13 @@
         _ (tap mo pub-out)
         po (pub pub-out :type)
 
-        ;; TODO figure out prefix, here conflict if notes/
+        ;; TODO figure out prefix, here conflict if chats/
         routes [["/download/chat/:chat-id/notes.zip" {:get (fn [{{:keys [chat-id]} :path-params}] {:status 200 :body (zip-notes chat-id)})}]
-                ["/notes/:chat-id" {:get (partial #'chat-overview peer)}]
-                ;; access each individual note link as referenced above
-                ["/notes/:chat-id/:note" {:get (partial #'view-note peer)}]
-                ["/notes/:chat-id/:note/edit" {:post (partial #'edit-note peer)}]
-                ["/notes/:chat-id/:note/edited" {:post (partial #'edited-note peer)}]
-                ["/notes/:chat-id/:note/delete" {:post (partial #'delete-note peer)}]]]
+                ["/chats/:chat-id" {:get (partial #'chat-overview peer)}]
+                ["/chats/:chat-id/notes/:note" {:get (partial #'view-note peer)}]
+                ["/chats/:chat-id/notes/:note/edit" {:post (partial #'edit-note peer)}]
+                ["/chats/:chat-id/notes/:note/edited" {:post (partial #'edited-note peer)}]
+                ["/chats/:chat-id/notes/:note/delete" {:post (partial #'delete-note peer)}]]]
     (swap! peer assoc-in [:http :routes :assistance] routes)
     ;; we will continuously interpret the messages
     (go-loop-try S [m (<? S msg-ch)]
@@ -375,19 +408,14 @@
                            ;; 2. recent conversation
                                conv (conversation @conn (:id chat) window-size)
                                _ (debug "conversation" conv)
-                               _ (debug "message count" (d/q '[:find (count ?m) .
-                                                               :in $ ?cid
-                                                               :where
-                                                               [?m :message/chat ?c]
-                                                               [?c :chat/id ?cid]]
-                                                             @conn (:id chat)))
-                               _ (when (<= (mod (d/q '[:find (count ?m) .
-                                                       :in $ ?cid
-                                                       :where
-                                                       [?m :message/chat ?c]
-                                                       [?c :chat/id ?cid]]
-                                                     @conn (:id chat))
-                                                window-size) 1)
+                               msg-count (d/q '[:find (count ?m) .
+                                                :in $ ?cid
+                                                :where
+                                                [?m :message/chat ?c]
+                                                [?c :chat/id ?cid]]
+                                              @conn (:id chat))
+                               _ (debug "message count" msg-count)
+                               _ (when (<= (mod msg-count window-size) 1)
                                    (summarize S conn conv chat))
 
 
@@ -441,7 +469,6 @@
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
 
                                _ (when (.contains reply "SEND_NOTES")
-                               ;; TODO transact document info
                                    (<? S (send-document! (:id chat) (zip-notes (:id chat))))
                                    (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) "Done."))))))
 
@@ -452,14 +479,14 @@
                                        (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Retrieved " title "\n" body)))))))
                                      (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find note: " title))))))))
 
-                               _ (when (.contains reply "LIST_NOTES")
-                                   (debug "listing notes")
+                               _ (when (.contains reply "CHAT_HOMEPAGE")
+                                   (debug "chat homepage")
                                    (let [#_#_issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Notes:\n" (format "%s/notes/%s" base-url (:id chat)) #_(str/join "\n" (map #(format "* %s" %) issues))))))))))
+                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str (format "%s/chats/%s" base-url (:id chat))))))))))
 
 
                                _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE")
-                                         (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "LIST_NOTES"))
+                                         (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "CHAT_HOMEPAGE"))
                                    (debug "No reply necessary")
                                    (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
                                                  (let [url (<? S (search terms))
@@ -474,6 +501,10 @@
                                          too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
                                          _ (debug "too fast by" too-fast-by)
                                          _ (<? S (timeout too-fast-by))
+
+                                         reply (if (<= msg-count 1) 
+                                                 (format "Hello! I am Simmie and am here to help you with your tasks or just to have fun. You can ask me for assistance at any time. I can also summarize conversations and help you with your notes. I can also track issues, do web searches, summarize links you send to me or generate images. Check out the website for this chat at %s/chats/%s" base-url (:id chat))
+                                                 reply)
                                          reply-msg (<? S (send-text! (:id chat) reply))
                                          _ (debug "reply-msg" reply-msg)
                                          _ (d/transact conn (msg->txs (:result reply-msg)))]))])

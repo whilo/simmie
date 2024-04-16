@@ -29,6 +29,7 @@
 
 databases/
 notes/
+chats/
 downloads/
 .clj-kondo/
 resources/config.edn

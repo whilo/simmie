@@ -18,8 +18,8 @@
    :body
    (json/read-value json/keyword-keys-object-mapper)))
 
-(defn second-url [result]
-  (-> result :web :results second :url))
+(defn extract-url [result]
+  (-> result :web :results first :url))
 
 
 (defn brave [[S peer [in out]]]
@@ -37,6 +37,6 @@
                    (debug "searching brave for" s)
                    (put? S out (assoc s
                                       :type :ie.simm.languages.web-search/search-reply
-                                      :response (try (second-url (search-brave (first (:args s)))) (catch Exception e e))))
+                                      :response (try (extract-url (search-brave (first (:args s)))) (catch Exception e e))))
                    (recur (<? S search))))
     [S peer [next-in out]]))
