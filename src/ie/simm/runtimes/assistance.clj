@@ -109,7 +109,7 @@
     (.close zip-out)
     zip-file))
 
-(def base-url "https://ec2-34-218-223-7.us-west-2.compute.amazonaws.com")
+(def base-url "https://ec2-52-32-225-23.us-west-2.compute.amazonaws.com")
 
 (def internal-link-tokenizer
   (md.parser/normalize-tokenizer
@@ -189,6 +189,25 @@
        [:div {:class "content has-text-centered"}
         [:p "Copyright © 2024 Christian Weilbach. All rights reserved."]]]]]]])
 
+
+(defn render-supertag [tag schema]
+  [:div.content
+   tag
+   [:ul
+    (->> schema
+         (filter (fn [[k _v]] (let [ns (str (namespace k))] (= ns "issue"))))
+         (map (fn [[k v]]
+                [:li [:span.container
+                [:span.content
+                      (name k)
+                      (case (:db/valueType v)
+                        :db.type/string [:input.input {:type "text" :name (name k)}]
+                        :db.type/long [:input.input {:type "text" :name (name k)}]
+                        :db.type/instant [:input.input {:type "text" :name (name k)}]
+                        "unknown")]]])))]])
+
+(def test-schema {:issue/scheduled #:db{:ident :issue/scheduled, :valueType :db.type/instant, :cardinality :db.cardinality/one, :id 23}, :note/link #:db{:ident :note/link, :valueType :db.type/ref, :cardinality :db.cardinality/many, :id 29}, :chat/all_members_are_administrators #:db{:ident :chat/all_members_are_administrators, :valueType :db.type/boolean, :cardinality :db.cardinality/one, :id 11}, :from/username #:db{:id 7, :ident :from/username, :valueType :db.type/string, :cardinality :db.cardinality/one}, :conversation/date #:db{:ident :conversation/date, :valueType :db.type/instant, :cardinality :db.cardinality/one, :id 82}, :message/text #:db{:ident :message/text, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 18}, :chat/title #:db{:ident :chat/title, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 13}, :issue/title #:db{:id 20, :ident :issue/title, :valueType :db.type/string, :cardinality :db.cardinality/one}, :note/body #:db{:ident :note/body, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 28}, :from/first_name #:db{:ident :from/first_name, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 5}, :from/is_bot #:db{:id 4, :ident :from/is_bot, :valueType :db.type/boolean, :cardinality :db.cardinality/one}, :from/id #:db{:ident :from/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity, :id 3}, :message/from #:db{:ident :message/from, :valueType :db.type/ref, :cardinality :db.cardinality/one, :id 2}, :issue/priority #:db{:ident :issue/priority, :valueType :db.type/long, :cardinality :db.cardinality/one, :id 22}, :message/link #:db{:ident :message/link, :valueType :db.type/string, :cardinality :db.cardinality/many, :id 19}, :message/id #:db{:id 1, :ident :message/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity}, :conversation/link #:db{:ident :conversation/link, :valueType :db.type/string, :cardinality :db.cardinality/many, :id 25}, :conversation/message #:db{:ident :conversation/message, :valueType :db.type/ref, :cardinality :db.cardinality/many, :id 26}, :chat/username #:db{:id 15, :ident :chat/username, :valueType :db.type/string, :cardinality :db.cardinality/one}, :conversation/summary #:db{:id 24, :ident :conversation/summary, :valueType :db.type/string, :cardinality :db.cardinality/one}, :chat/type #:db{:ident :chat/type, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 16}, :message/chat #:db{:ident :message/chat, :valueType :db.type/ref, :cardinality :db.cardinality/one, :id 9}, :from/last_name #:db{:id 6, :ident :from/last_name, :valueType :db.type/string, :cardinality :db.cardinality/one}, :note/title #:db{:id 27, :ident :note/title, :valueType :db.type/string, :unique :db.unique/identity, :cardinality :db.cardinality/one}, :message/date #:db{:id 17, :ident :message/date, :valueType :db.type/instant, :cardinality :db.cardinality/one}, :issue/id #:db{:id 21, :ident :issue/id, :valueType :db.type/long, :unique :db.unique/identity, :cardinality :db.cardinality/one}, :chat/first_name #:db{:id 12, :ident :chat/first_name, :valueType :db.type/string, :cardinality :db.cardinality/one}, :chat/id #:db{:id 10, :ident :chat/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity}, :message/url #:db{:id 75, :ident :message/url, :valueType :db.type/string, :cardinality :db.cardinality/many}, :from/language_code #:db{:ident :from/language_code, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 8}, :chat/under-assistance? #:db{:id 14, :ident :chat/under-assistance?, :valueType :db.type/boolean, :cardinality :db.cardinality/one}, :note/summary #:db{:id 30, :ident :note/summary, :valueType :db.type/ref, :cardinality :db.cardinality/many}})
+
 (defn chat-overview [peer {{:keys [chat-id]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
         title (or (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)])) "Noname chat")
@@ -200,22 +219,84 @@
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {}
-         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Chats"]]]
+         [:li [:span #_{:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-circle"}]] [:span "Systems"]]]
          [:li.is-active
           [:a {:href (str "/chats/" chat-id)}
            [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]]
            [:span title]]]]]
-       [:div.content "This chat has no description yet."]
+       [:div.content "The following points describes how to break down what you want into actionable and quantifiable steps that can potentially be automated by agents."]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "goals"}
+         [:a {:class "" :href "goals"} [:i {:class "bx bx-target-lock"}]]
+         [:span {:class ""} "Goals"]]
+        [:div.content
+         [:p "Goals describe what you generally try to achieve in this process."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "Provide a simple and efficient way to keep track of important information and conversations."]
+          [:li "Designed to be easy to use and to help you stay organized."]
+          [:li "Able to learn from your interactions and improve over time."]]]]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "issues"}
+         [:a {:class "" :href "issues"} [:i {:class "bx bx-check-square"}]]
+         [:span {:class ""} "Issues"]]
+        [:div {:class "content"}
+         [:p "Here you list all issues, problems, general situations or detailed scenarios where one or more of the goals are not met. If possible describe the value that solving each issue would provide to the system."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "Only Telegram is supported, considered Slack, Discord, Whatsapp(?). Value: Slack opens business clients. Value: More potential users."]
+          [:li "Automatically infer and update this process description from context with conversational AI. Value: More users if system makes sense and is accepted."]
+          [:li "Intelligently select context from memory to learn over time. Value: More accurate, relevant and personalized responses."]]]]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "startegies"}
+         [:a {:class "" :href "strategies"} [:i {:class "bx bx-map-alt"}]]
+         [:span {:class ""} "Strategy"]]
+        [:div {:class "content"}
+         [:p "Here you list strategies that can be used to achieve the goals. They are general approaches that can be taken to solve the issues and achieve the goals. They help to derive actions that can be taken to solve the issues and achieve the goals."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "Implement general htmx UI components for Datahike schema."]]]]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "startegies"}
+         [:a {:class "" :href "strategies"} [:i {:class "bx bx-joystick-button"}]]
+         [:span {:class ""} "Actions"]]
+        [:div {:class "content"}
+         [:p "Here you list actions that can be taken to achieve the goals. They are specific steps that can be taken to solve the issues and achieve the goals."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "Use a simple note-taking system to keep track of important information and conversations."]]]]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "progress-metrics"}
+         [:a {:class "" :href "progress-metrics"} [:i {:class "bx bx-up-arrow-circle"}]]
+         [:span {:class ""} "Progress metrics"]]
+        [:div {:class "content"}
+         [:p "Define progress metrics that measure how well each issue is being adressed. Typically they are quantifiable and can be measured over time, e.g. daily, weekly and monthly. Where possible they should quantify how much value is provided for solving each issue. For example if a goal is to increase the number of users, a progress metric could be the number of new users per day. For the monthly revenue the number of daily users could be a progress metric, but a translation factor needs to be defined."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "New users/day."]
+          [:li "Company revenue/month."]]]]
+       [:div {:class "container"}
+        [:h2 {:class "title is-2 is-spaced" :id "resources"}
+         [:a {:class "" :href "resources"} [:i {:class "bx bx-dollar-circle"}]]
+         [:span {:class ""} "Resources"]]
+        [:div {:class "content"}
+         [:p "These are resources you have availble to tackle the issues and achieve the goals. They can be people, tools, data, or anything else that can help you."]]
+        [:div {:class "content"}
+         [:ul
+          [:li "Telegram chat."]
+          [:li "Datahike database."]
+          [:li "1000 USD"]
+          [:li "100 hours"]]]]
        [:div {:class "container"}
         [:h2 {:class "title is-2 is-spaced" :id "bots"}
-         [:a {:class "" :href "bots"} "# "]
+         [:a {:class "" :href "bots"} [:i {:class "bx bx-bot"}]]
          [:span {:class ""} "Agents and Processes"]]
         [:div {:class "content"}
-         [:p "Human-like agents are running in the background to assist you. They are able to answer questions, collaborate, provide summaries, and help you with your tasks. They are also able to learn from your interactions and improve over time. There are also simpler processes that can be triggered by certain keywords or commands. They are also called bots in some contexts."]]
+         [:p "Support agents are running in the background to assist you. They are able to answer questions, collaborate, provide summaries, and help you with your tasks. They are also able to learn from your interactions and improve over time. There are also simpler processes that can be triggered by certain keywords or commands. They are also called bots in some contexts."]]
         [:div {:class "container"}
          [:div.content
           [:h3 {:class "title is-3 is-spaced" :id "note-taker"}
-           [:a {:class "" :href "note-taker"} "# "]
+           [:a {:class "" :href "note-taker"} [:i {:class "bx bx-bot"}]]
            [:span {:class ""} "Note-taker"]]
           [:p "The note-taker is a simple note-taking system that allows you to keep track of important information and conversations. You can create new notes, edit existing ones, and link them together. The note-taker will also automatically summarize conversations and create new notes for you."]
           [:div.container
@@ -226,13 +307,13 @@
             [:p "These are all notes that have been created in this chat. You can click on a note to view its content, edit it, or delete it. You can also download all notes as a zip file."]
             [:a {:class "button" :href (str "/download/chat/" chat-id "/notes.zip")} [:span {:class "icon is-small"} [:i {:class "bx bx-download"}]] [:span "Download"]]
             [:div {:class "content"}
-            (if (seq notes)
-             [:ul (map (fn [f] [:li [:a {:href (str "/chats/" chat-id "/notes/" f)} f]]) notes)]
-              "No notes.")]]]]]
+             (if (seq notes)
+               [:ul (map (fn [f] [:li [:a {:href (str "/chats/" chat-id "/notes/" f)} f]]) notes)]
+               "No notes.")]]]]]
         [:div.container
          [:div.content
           [:h3 {:class "title is-3 is-spaced" :id "issue-tracker"}
-           [:a {:class "" :href "issue-tracker"} "# "]
+           [:a {:class "" :href "issue-tracker"} [:i {:class "bx bx-bot"}]]
            [:span {:class ""} "Issue tracker"]]
           [:div.content
            [:p "The issue tracker is a simple system that allows you to keep track of tasks, bugs, and other issues. you can create new issues, assign them to people, set priorities, and schedule them. the issue tracker will also automatically remind you of upcoming deadlines in the chat and help you to stay organized."]]
@@ -283,7 +364,7 @@
       [:div {:class "container"}
        [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
         [:ul {} #_[:li [:p "Process"]]
-         [:li [:a {:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-home"}]] [:span "Chats"]]]
+         [:li [:span #_{:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-circle"}]] [:span "Systems"]]]
          [:li [:a {:href (str "/chats/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
          [:li.is-active [:a {:href (str "/chats/" chat-id "/notes/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
        [:article {:id "note" :class "message"}
@@ -393,7 +474,7 @@
                  (when m
                    (binding [lb/*chans* [next-in pi out po]]
                      (let [{:keys [msg]
-                            {:keys [chat from]} :msg} m]
+                            {:keys [chat from text]} :msg} m]
                        (try
                          (let [_ (debug "received message" m)
                                firstname (:first_name from)
@@ -432,82 +513,83 @@
                                                 [?c :note/title ?t]
                                                 [?c :note/body ?s]]
                                               @conn (concat active-links (extract-links conv)))
-                               _ (debug "active links" #_summaries active-links)
-
+                               _ (debug "active links" #_summaries active-links)]
+                           (when (or (= (:type chat) "private")
+                                     (.contains text "@simmie"))
                           ;; 4. derive reply
-                               assist-prompt (format pr/assistance
-                                                     (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
-                                                                           summaries))
-                                                     conv
-                                                     (str (java.util.Date.)))
-                               _ (debug "prompt" assist-prompt)
-                               reply (<? S (reasoner-llm assist-prompt))
-                               _ (debug "reply" reply)
+                             (let [assist-prompt (format pr/assistance
+                                                         (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
+                                                                               summaries))
+                                                         conv
+                                                         (str (java.util.Date.)))
+                                   _ (debug "prompt" assist-prompt)
+                                   reply (<? S (reasoner-llm assist-prompt))
+                                   _ (debug "reply" reply)
 
                                ;; 5. dispatch
-                               _ (when-let [prompt (second (re-find #"IMAGEGEN\(['\"](.*)['\"]\)" reply))]
-                                   (let [url (<? S (image-gen prompt))]
-                                     (debug "generated image" url)
-                                     (d/transact conn (msg->txs (:result (<? S (send-photo! (:id chat) url)))))))
+                                   _ (when-let [prompt (second (re-find #"IMAGEGEN\(['\"](.*)['\"]\)" reply))]
+                                       (let [url (<? S (image-gen prompt))]
+                                         (debug "generated image" url)
+                                         (d/transact conn (msg->txs (:result (<? S (send-photo! (:id chat) url)))))))
 
-                               _ (when-let [title (second (re-find #"ADD_ISSUE\(['\"](.*)['\"]\)" reply))]
-                                   (debug "adding issue" title)
-                                   (d/transact conn [{:db/id -1 :issue/title title}])
-                                   (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Added issue: " title)))))))
+                                   _ (when-let [title (second (re-find #"ADD_ISSUE\(['\"](.*)['\"]\)" reply))]
+                                       (debug "adding issue" title)
+                                       (d/transact conn [{:db/id -1 :issue/title title}])
+                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Added issue: " title)))))))
 
-                               _ (when-let [title (second (re-find #"REMOVE_ISSUE\(['\"](.*)['\"]\)" reply))]
-                                   (if-let [eid (d/q '[:find ?i . :in $ ?t :where [?i :issue/title ?t]] @conn title)]
-                                     (do
-                                       (debug "removing issue" title eid)
-                                       (d/transact conn [[:db/retractEntity eid]])
-                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Removed issue: " title)))))))
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find issue: " title))))))))
+                                   _ (when-let [title (second (re-find #"REMOVE_ISSUE\(['\"](.*)['\"]\)" reply))]
+                                       (if-let [eid (d/q '[:find ?i . :in $ ?t :where [?i :issue/title ?t]] @conn title)]
+                                         (do
+                                           (debug "removing issue" title eid)
+                                           (d/transact conn [[:db/retractEntity eid]])
+                                           (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Removed issue: " title)))))))
+                                         (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find issue: " title))))))))
 
-                               _ (when (or (.contains reply "LIST_ISSUES") (.contains reply "DAILY"))
-                                   (debug "listing issues")
-                                   (let [issues (d/q '[:find [?t ...] :where [_ :issue/title ?t]] @conn)]
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
+                                   _ (when (or (.contains reply "LIST_ISSUES") (.contains reply "DAILY"))
+                                       (debug "listing issues")
+                                       (let [issues (d/q '[:find [?t ...] :where [_ :issue/title ?t]] @conn)]
+                                         (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Issues:\n" (str/join "\n" (map #(format "* %s" %) issues))))))))))
 
-                               _ (when (.contains reply "SEND_NOTES")
-                                   (<? S (send-document! (:id chat) (zip-notes (:id chat))))
-                                   (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) "Done."))))))
+                                   _ (when (.contains reply "SEND_NOTES")
+                                       (<? S (send-document! (:id chat) (zip-notes (:id chat))))
+                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) "Done."))))))
 
-                               _ (when-let [title (second (re-find #"RETRIEVE_NOTE\(['\"](.*)['\"]\)" reply))]
-                                   (if-let [body (d/q '[:find ?b . :in $ ?t :where [?n :note/title ?t] [?n :note/body ?b]] @conn title)]
-                                     (do
-                                       (debug "retrieved note" title body)
-                                       (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Retrieved " title "\n" body)))))))
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find note: " title))))))))
+                                   _ (when-let [title (second (re-find #"RETRIEVE_NOTE\(['\"](.*)['\"]\)" reply))]
+                                       (if-let [body (d/q '[:find ?b . :in $ ?t :where [?n :note/title ?t] [?n :note/body ?b]] @conn title)]
+                                         (do
+                                           (debug "retrieved note" title body)
+                                           (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Retrieved " title "\n" body)))))))
+                                         (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str "Could not find note: " title))))))))
 
-                               _ (when (.contains reply "CHAT_HOMEPAGE")
-                                   (debug "chat homepage")
-                                   (let [#_#_issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
-                                     (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str (format "%s/chats/%s" base-url (:id chat))))))))))
+                                   _ (when (.contains reply "CHAT_HOMEPAGE")
+                                       (debug "chat homepage")
+                                       (let [#_#_issues (d/q '[:find [?t ...] :where [_ :note/title ?t]] @conn)]
+                                         (d/transact conn (msg->txs (:result (<? S (send-text! (:id chat) (str (format "%s/chats/%s" base-url (:id chat))))))))))
 
 
-                               _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE")
-                                         (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "CHAT_HOMEPAGE"))
-                                   (debug "No reply necessary")
-                                   (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
-                                                 (let [url (<? S (search terms))
-                                                       body (<? S (extract-body url))
-                                                       prompt (format pr/search (conversation @conn (:id chat) 5) body)
-                                                       reply (<? S (cheap-llm prompt))]
-                                                   (debug "conducting web search" terms)
-                                                   (str reply "\n" url))
-                                                 (.replace reply "DAILY" ""))
-                                         send-time-ms (System/currentTimeMillis)
-                                         min-response-time 3000
-                                         too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
-                                         _ (debug "too fast by" too-fast-by)
-                                         _ (<? S (timeout too-fast-by))
+                                   _ (if (or (.contains reply "QUIET") (.contains reply "IMAGEGEN") (.contains reply "LIST_ISSUES") (.contains reply "ADD_ISSUE")
+                                             (.contains reply "REMOVE_ISSUE") (.contains reply "SEND_NOTES") (.contains reply "RETRIEVE_NOTE") (.contains reply "CHAT_HOMEPAGE"))
+                                       (debug "No reply necessary")
+                                       (let [reply (if-let [terms (second (re-find #"WEBSEARCH\(['\"](.*)['\"]\)" reply))]
+                                                     (let [url (<? S (search terms))
+                                                           body (<? S (extract-body url))
+                                                           prompt (format pr/search (conversation @conn (:id chat) 5) body)
+                                                           reply (<? S (cheap-llm prompt))]
+                                                       (debug "conducting web search" terms)
+                                                       (str reply "\n" url))
+                                                     (.replace reply "DAILY" ""))
+                                             send-time-ms (System/currentTimeMillis)
+                                             min-response-time 3000
+                                             too-fast-by (max 0 (- min-response-time (- send-time-ms start-time-ms)))
+                                             _ (debug "too fast by" too-fast-by)
+                                             _ (<? S (timeout too-fast-by))
 
-                                         reply (if (<= msg-count 1) 
-                                                 (format "Hello! I am Simmie and am here to help you with your tasks or just to have fun. You can ask me for assistance at any time. I can also summarize conversations and help you with your notes. I can also track issues, do web searches, summarize links you send to me or generate images. Check out the website for this chat at %s/chats/%s" base-url (:id chat))
-                                                 reply)
-                                         reply-msg (<? S (send-text! (:id chat) reply))
-                                         _ (debug "reply-msg" reply-msg)
-                                         _ (d/transact conn (msg->txs (:result reply-msg)))]))])
+                                             reply (if (<= msg-count 1)
+                                                     (format "Hello! I am Simmie and am here to help you with your tasks or just to have fun. You can ask me for assistance at any time. I can also summarize conversations and help you with your notes. I can also track issues, do web searches, summarize links you send to me or generate images. Check out the website for this chat at %s/chats/%s" base-url (:id chat))
+                                                     reply)
+                                             reply-msg (<? S (send-text! (:id chat) reply))
+                                             _ (debug "reply-msg" reply-msg)
+                                             _ (d/transact conn (msg->txs (:result reply-msg)))]))])))
                          (catch Exception e
                            (let [error-id (uuid)]
                              (error "Could not process message(" error-id "): " m e)

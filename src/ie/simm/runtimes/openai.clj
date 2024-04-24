@@ -23,7 +23,7 @@
   (if (>= (count text) (* 4 (window-sizes model)))
     (do
       (warn "text too long for " model ": " (count text) (window-sizes model))
-      (throw (ex-info "Sorry, the text is too long for this model. Please try a shorter text." {:type ::text-too-long :model model :text text})))
+      (throw (ex-info "Sorry, the text is too long for this model. Please try a shorter text." {:type ::text-too-long :model model :text-start (subs text 0 100) :count (count text)})))
     (let [res (create :model model :messages [{:role "system" :content text}])]
       (py.- (py.- (first (py.- res choices)) message) content))))
 

@@ -61,6 +61,8 @@
 
   (def conn ((:conn @peer) 79524334))
 
+  (d/schema @conn)
+
   (require '[datahike.experimental.gc :as gc])
 
   (gc/gc! @conn)
