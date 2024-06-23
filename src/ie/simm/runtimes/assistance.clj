@@ -25,18 +25,6 @@
             [clojure.test :as ct])
   (:import [java.util.zip ZipEntry ZipOutputStream]))
 
-(comment
- ;; idealized version of the following summarize function
-
-;; implicit let
-  (let [conv (conversation window-size)
-        summarization (reasoner-llm (fill-in prompts/summarization conv))
-        _ (add-summarization! summarization)
-        notes (extract-notes summarization)
-        _ (for [note notes]
-            (update-note! (reasoner-llm (fill-in prompts/note note summarization conv))))])
-  )
-
 (defn summarize [S conn conv chat]
   (go-try S
           (debug "=========================== SUMMARIZING ===============================")
@@ -117,10 +105,6 @@
     :handler (fn [match] {:type :internal-link
                           :text (match 1)})}))
 
-(comment
-  ;; figure out separate extraction of link https://nextjournal.github.io/markdown/notebooks/parsing_extensibility/
-  (md.parser/tokenize-text-node internal-link-tokenizer {} {:text "some [[set]] of [[wiki][wiki]] link"})
-  )
 
 (def md-renderer
   (assoc md.transform/default-hiccup-renderers
@@ -205,8 +189,6 @@
                         :db.type/long [:input.input {:type "text" :name (name k)}]
                         :db.type/instant [:input.input {:type "text" :name (name k)}]
                         "unknown")]]])))]])
-
-(def test-schema {:issue/scheduled #:db{:ident :issue/scheduled, :valueType :db.type/instant, :cardinality :db.cardinality/one, :id 23}, :note/link #:db{:ident :note/link, :valueType :db.type/ref, :cardinality :db.cardinality/many, :id 29}, :chat/all_members_are_administrators #:db{:ident :chat/all_members_are_administrators, :valueType :db.type/boolean, :cardinality :db.cardinality/one, :id 11}, :from/username #:db{:id 7, :ident :from/username, :valueType :db.type/string, :cardinality :db.cardinality/one}, :conversation/date #:db{:ident :conversation/date, :valueType :db.type/instant, :cardinality :db.cardinality/one, :id 82}, :message/text #:db{:ident :message/text, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 18}, :chat/title #:db{:ident :chat/title, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 13}, :issue/title #:db{:id 20, :ident :issue/title, :valueType :db.type/string, :cardinality :db.cardinality/one}, :note/body #:db{:ident :note/body, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 28}, :from/first_name #:db{:ident :from/first_name, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 5}, :from/is_bot #:db{:id 4, :ident :from/is_bot, :valueType :db.type/boolean, :cardinality :db.cardinality/one}, :from/id #:db{:ident :from/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity, :id 3}, :message/from #:db{:ident :message/from, :valueType :db.type/ref, :cardinality :db.cardinality/one, :id 2}, :issue/priority #:db{:ident :issue/priority, :valueType :db.type/long, :cardinality :db.cardinality/one, :id 22}, :message/link #:db{:ident :message/link, :valueType :db.type/string, :cardinality :db.cardinality/many, :id 19}, :message/id #:db{:id 1, :ident :message/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity}, :conversation/link #:db{:ident :conversation/link, :valueType :db.type/string, :cardinality :db.cardinality/many, :id 25}, :conversation/message #:db{:ident :conversation/message, :valueType :db.type/ref, :cardinality :db.cardinality/many, :id 26}, :chat/username #:db{:id 15, :ident :chat/username, :valueType :db.type/string, :cardinality :db.cardinality/one}, :conversation/summary #:db{:id 24, :ident :conversation/summary, :valueType :db.type/string, :cardinality :db.cardinality/one}, :chat/type #:db{:ident :chat/type, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 16}, :message/chat #:db{:ident :message/chat, :valueType :db.type/ref, :cardinality :db.cardinality/one, :id 9}, :from/last_name #:db{:id 6, :ident :from/last_name, :valueType :db.type/string, :cardinality :db.cardinality/one}, :note/title #:db{:id 27, :ident :note/title, :valueType :db.type/string, :unique :db.unique/identity, :cardinality :db.cardinality/one}, :message/date #:db{:id 17, :ident :message/date, :valueType :db.type/instant, :cardinality :db.cardinality/one}, :issue/id #:db{:id 21, :ident :issue/id, :valueType :db.type/long, :unique :db.unique/identity, :cardinality :db.cardinality/one}, :chat/first_name #:db{:id 12, :ident :chat/first_name, :valueType :db.type/string, :cardinality :db.cardinality/one}, :chat/id #:db{:id 10, :ident :chat/id, :valueType :db.type/long, :cardinality :db.cardinality/one, :unique :db.unique/identity}, :message/url #:db{:id 75, :ident :message/url, :valueType :db.type/string, :cardinality :db.cardinality/many}, :from/language_code #:db{:ident :from/language_code, :valueType :db.type/string, :cardinality :db.cardinality/one, :id 8}, :chat/under-assistance? #:db{:id 14, :ident :chat/under-assistance?, :valueType :db.type/boolean, :cardinality :db.cardinality/one}, :note/summary #:db{:id 30, :ident :note/summary, :valueType :db.type/ref, :cardinality :db.cardinality/many}})
 
 (defn chat-overview [peer {{:keys [chat-id]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -497,27 +479,27 @@
                                               @conn (:id chat))
                                _ (debug "message count" msg-count)
                                _ (when (<= (mod msg-count window-size) 1)
-                                   (summarize S conn conv chat))
+                                   (summarize S conn conv chat))]
 
-
-                           ;; 3. retrieve summaries for active links
-                               all-links (d/q '[:find [?t ...] :where [_ :conversation/link ?t]] @conn)
-                               relevant (<? S (cheap-llm (format "You are given the following links in Wikipedia style brackets [[some entity]]:\n\n%s\n\nList the most relevant links for the following conversation with descending priority.\n\n%s"
-                                                                 (str/join ", " (map #(str "[[" % "]]") all-links))
-                                                                 conv)))
-                               active-links (concat (take 3 (extract-links relevant)) [firstname])
-
-                               summaries (d/q '[:find ?t ?s
-                                                :in $ [?t ...]
-                                                :where
-                                                [?c :note/title ?t]
-                                                [?c :note/body ?s]]
-                                              @conn (concat active-links (extract-links conv)))
-                               _ (debug "active links" #_summaries active-links)]
                            (when (or (= (:type chat) "private")
                                      (.contains text "@simmie"))
+                             (let [;; 3. retrieve summaries for active links
+                                   all-links (d/q '[:find [?t ...] :where [_ :conversation/link ?t]] @conn)
+                                   relevant (<? S (cheap-llm (format "You are given the following links in Wikipedia style brackets [[some entity]]:\n\n%s\n\nList the most relevant links for the following conversation with descending priority.\n\n%s"
+                                                                     (str/join ", " (map #(str "[[" % "]]") all-links))
+                                                                     conv)))
+                                   active-links (concat (take 3 (extract-links relevant)) [firstname])
+
+                                   summaries (d/q '[:find ?t ?s
+                                                    :in $ [?t ...]
+                                                    :where
+                                                    [?c :note/title ?t]
+                                                    [?c :note/body ?s]]
+                                                  @conn (concat active-links (extract-links conv)))
+                                   _ (debug "active links" #_summaries active-links)
+
                           ;; 4. derive reply
-                             (let [assist-prompt (format pr/assistance
+                                   assist-prompt (format pr/assistance
                                                          (str/join "\n\n" (map (fn [[t s]] (format "Title: %s\nBody: %s" t s))
                                                                                summaries))
                                                          conv
@@ -597,167 +579,3 @@
                    (recur (<? S msg-ch))))
     ;; Note that we pass through the supervisor, peer and new channels for composition
     [S peer [next-in prev-out]]))
-
-
-;; unportd logic from first prototype
-(comment
-
- (h/defhandler bot-api
-    (h/command-fn "start" (fn [{{id :id :as chat} :chat}]
-                            (debug "Bot joined new chat: " chat)
-                            (notify! id "Welcome! You can always get help with /help.")))
-
-    (h/command-fn "help" (fn [{{id :id :as chat} :chat}]
-                           (notify! id "konstruktiv is here to help!\n\nIt automatically transcribes audio messages to text. Try the following commands /daily, /assist, /summarize, /search, /imitate username.")))
-
-    (h/command-fn "search" (fn [{:keys [text chat] {id :id} :chat}]
-                             (let [terms (->> (str/split (str/trim text) #"\s+") rest (str/join " "))
-                                   terms (if-not (empty? (str/trim terms))
-                                           terms
-                                           (openai/chat "gpt-3.5-turbo" (format "%s\n\n\nDerive a web search with a few relevant terms (words) from the previous conversation. Only return the terms and nothing else.\n" (conversation id))))]
-                               (debug "searching for terms" terms)
-                               (go
-                                 (e/with-chrome-headless driver
-                                   (notify! id (summarize-web-search driver terms)))))))
-
-    (h/command-fn "add" (fn [{:keys [text chat] {id :id} :chat :as message}]
-                          (try
-                            (let [args (->> (str/split (str/trim text) #"\s+") rest)]
-                              (case (first args)
-                                "issue" (do (add-issue! conn (str/join " " (rest args)) id)
-                                            (notify! id "Added issue." {:reply_to_message_id (:message_id message)})))
-                              "Thanks!")
-                            (catch Exception _
-                              "Thanks!"))))
-
-    (h/command-fn "remove" (fn [{:keys [text chat] {id :id} :chat :as message}]
-                             (try
-                               (let [args (->> (str/split (str/trim text) #"\s+") rest)]
-                                 (case (first args)
-                                   "issue" (do (remove-issue! conn (str/join " " (rest args)) id)
-                                               (notify! id "Removed issue." {:reply_to_message_id (:message_id message)})))
-                                 "Thanks!")
-                               (catch Exception _
-                                 "Thanks!"))))
-
-    (h/command-fn "schedule" (fn [{:keys [text chat] {id :id} :chat :as message}]
-                               (try
-                                 (let [args (->> (str/split (str/trim text) #"\s+") rest)]
-                                   (case (first args)
-                                     "issue" (do (schedule-issue! conn (str/join " " (rest args)) id)
-                                                 (notify! id "Scheduled issue at " {:reply_to_message_id (:message_id message)})))
-                                   "Thanks!")
-                                 (catch Exception _
-                                   "Thanks!"))))
-
-    (h/command-fn "list" (fn [{:keys [text chat] {id :id} :chat}]
-                           (try
-                             (let [args (->> (str/split (str/trim text) #"\s+") rest)]
-                               (case (first args)
-                                 "issue" (notify! id (list-issues conn id)))
-                               "Thanks!")
-                             (catch Exception _
-                               "Thanks!"))))
-
-    (h/command-fn "daily" (fn [{{id :id :as chat} :chat}]
-                            (let [chat-chan (chan)]
-                              (sub chat-pub id chat-chan)
-                              (debug "daily exchange: " chat)
-                              (daily-agenda chat chat-chan)
-                            ;; TODO don't block thread!
-                              #_((good-morning chat (m/watch !input))
-                                 #(debug ::morning-success %)
-                                 #(debug ::morning-failure %)))))
-
-    (h/command-fn "assist"  (fn [{{id :id :as chat} :chat}]
-                              (d/transact conn [[:db/add [:chat/id (long id)] :chat/under-assistance? true]])
-                              (println "Help was requested in " chat)
-                              (notify! id "Assistance is now turned on. You can pause it again with /pause.")))
-
-    (h/command-fn "pause" (fn [{{id :id :as chat} :chat}]
-                            (d/transact conn [[:db/add [:chat/id (long id)] :chat/under-assistance? false]])
-                            (debug "Bot was paused in " chat)
-                            (notify! id "Pausing for now. You can turn it on again with /assist.")))
-
-    (h/command-fn "summarize" (fn [{{id :id :as chat} :chat}]
-                                (let [summary (openai/chat "gpt-3.5-turbo" (format pr/summarization (conversation id)))]
-                                  (debug "Generated summary: " summary)
-                                  (notify! id
-                                           #_{:reply_markup {:inline_keyboard [[{:text "Good" :callback_data "good"}
-                                                                                {:text "Bad" :callback_data "bad"}]]}}
-                                           summary))))
-
-    (h/command-fn "imitate" (fn [{:keys [text] {id :id :as chat} :chat :as message}]
-                              (let [username (->> (str/split (str/trim text) #"\s+")
-                                                  second)
-                                    _ (debug "Imitating " username)
-                                    conversation (conversation id)
-                                    _ (println conversation)
-                                    prompt (format pr/clone-prompt username conversation)
-                                    response (openai/chat "gpt-4-1106-preview" #_"gpt-3.5-turbo" prompt)]
-                                (notify! id response))))
-
-    (h/message-fn  (fn [{:keys [chat voice] :as message}]
-                     (debug "Received message:" message)
-                     (try
-                       (let [chat-id (:id chat)
-                             message (if-not voice
-                                       message
-                                       (let [transcript (create-transcript! voice)]
-                                         (debug "created transcript" transcript)
-                                         (notify! chat-id transcript {:reply_to_message_id (:message_id message)})
-                                         (assoc message :text transcript)))]
-                         (d/transact conn (msg->txs message))
-                         #_(reset! !input message)
-                         (put! in-chan message)
-                         (when (get (d/entity @conn [:chat/id chat-id]) :chat/under-assistance?)
-                           (assist! chat-id)))
-                       (catch Exception e
-                         (warn "Could not process message" message e)))))) 
-
- (defn daily-agenda [chat chat-chan]
-  (go
-    (let [{:keys [id username]} chat
-          affects-agenda? #(let [res (openai/chat "gpt-4-1106-preview" #_"gpt-3.5-turbo" %)]
-                             (debug "affects agenda" res)
-                             (when-not (.contains res "NOOP") res))
-
-          agenda (m/? (get-agenda username))
-
-          _ (notify! id (format "Hey %s! How are you doing?" username))
-          _reply-how-are-you-doing (<! chat-chan)
-          ;; be polite
-          _ (notify! id (openai/chat "gpt-3.5-turbo" (format "%s\n\nGiven this recent conversation, briefly reply to the last message directly." (conversation id))))
-
-          ;; weather affects agenda
-          conv (conversation id)
-          _ (debug "conversation" conv)
-          agenda-as-json (json/write-value-as-string (select-keys agenda #{:weather :agenda}))
-          weather-affects-agenda? (affects-agenda? (format pr/weather-affects-agenda conv agenda-as-json username))
-          _ (when weather-affects-agenda?
-              (notify! id weather-affects-agenda?)
-              (<! (go-loop [in (<! chat-chan)]
-                    (let [conversation (conversation id)
-                          _ (debug "proceeding in weather discussion" in)
-                          not-done? (let [res (openai/chat "gpt-4-1106-preview" #_"gpt-3.5-turbo" (format "%s\n\nAre we done discussing how the weather affects the agenda in this conversation? Answer only with YES or NO." conversation))]
-                                      (.contains res "NO"))]
-                      (when not-done? 
-                        (notify! id (openai/chat "gpt-4-1106-preview" (format "%s\n\nGiven the preceeding conversation, make a suggestion how to fix the agenda." conversation)))
-                        (recur (<! chat-chan)))))))
-
-          ;; emails affect agenda
-          agenda-as-json (json/write-value-as-string (select-keys agenda #{:new-emails :agenda}))
-          emails-affect-agenda? (affects-agenda? (format pr/emails-affect-agenda (conversation id) agenda-as-json username))
-
-          _ (when emails-affect-agenda?
-              (notify! id emails-affect-agenda?)
-              (<! (go-loop [in (<! chat-chan)]
-                    (let [conversation (conversation id)
-                          _ (debug "proceeding in email discussion" in)
-                          not-done? (let [res (openai/chat "gpt-4-1106-preview" #_"gpt-3.5-turbo" (format "%s\n\nAre we done discussing how the emails affect the agenda in this conversation? Answer only with YES or NO." conversation))]
-                                      (.contains res "NO"))]
-                      (when not-done? (recur (<! chat-chan)))))))]
-      (notify! id "Thanks! That's all that there is discuss for now.")
-      (close! chat-chan)))) 
-  
-  )

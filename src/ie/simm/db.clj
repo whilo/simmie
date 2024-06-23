@@ -7,8 +7,7 @@
 
 (defn ensure-conn [peer chat-id]
   (or (get-in @peer [:conn chat-id])
-      (let [;; ensure "databases directory exists and creating it if not"
-            path (str "databases/" chat-id)
+      (let [path (str "databases/" chat-id)
             _ (io/make-parents path)
             cfg {:store {:backend :file :scope "simm.ie/chats" :path path}}
             conn
