@@ -22,4 +22,4 @@ Just start a REPL and explore the [assistance](./src/ie/simm/runtimes/assistance
 
 Copyright © 2024 Christian Weilbach
 
-Distributed under the Eclipse Public License version 1.0.
+Distributed under the MIT license.
