@@ -8,7 +8,7 @@
             [superv.async :refer [S go-loop-try <? put?]]))
 
 (defn extract-body [url]
-  (e/with-chrome-headless driver
+  (e/with-firefox-headless driver
     (e/go driver url)
     (e/get-element-text driver {:tag :body})))
 

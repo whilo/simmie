@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
-        io.replikativ/datahike {:mvn/version "0.6.1558"}
+        io.replikativ/datahike {:mvn/version "0.6.1576"}
         clj-python/libpython-clj {:mvn/version "2.025"}
         morse/morse {:mvn/version "0.4.3"}
         io.replikativ/kabel {:mvn/version "0.2.2"}
@@ -10,10 +10,12 @@
         hiccup/hiccup {:mvn/version "2.0.0-RC3"}
         org.clj-commons/hickory {:mvn/version "0.7.4"}
         ring/ring-jetty-adapter {:mvn/version "1.12.0"}
-        etaoin/etaoin {:mvn/version "1.0.40"}
-        missionary/missionary {:mvn/version "b.34"}
+        etaoin/etaoin {:mvn/version "1.1.41"}
         nrepl/nrepl {:mvn/version "1.1.1"}
         cider/cider-nrepl {:mvn/version,"0.47.1"}
+
+        ;; exploratory
+        missionary/missionary {:mvn/version "b.34"}
         pangloss/pattern {:git/url "https://github.com/pangloss/pattern"
                           :sha "affc7f3ac907f5b98de6638574a741e4693f1648"}
         anglican/anglican {:mvn/version "1.1.0"}}

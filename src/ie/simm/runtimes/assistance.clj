@@ -3,7 +3,7 @@
    
    Properties: stateful, persistent, durable"
   (:require [ie.simm.languages.bindings :as lb]
-            [ie.simm.languages.gen-ai :refer [cheap-llm reasoner-llm stt-basic image-gen]]
+            [ie.simm.languages.gen-ai :refer [cheap-llm cheap-llm stt-basic image-gen]]
             [ie.simm.languages.web-search :refer [search]]
             [ie.simm.languages.browser :refer [extract-body]]
             [ie.simm.languages.chat :refer [send-text! send-photo! send-document!]]
@@ -29,7 +29,7 @@
   (go-try S
           (debug "=========================== SUMMARIZING ===============================")
           (let [db @conn
-                summarization  (<? S (reasoner-llm (format pr/summarization conv)))
+                summarization  (<? S (cheap-llm (format pr/summarization conv)))
                 messages (->> (d/q '[:find ?d ?e
                                      :in $ ?chat
                                      :where
@@ -47,7 +47,7 @@
                                   (go-for S [[i note] (partition 2 (interleave (iterate inc 2) note-titles))
                                              :let [[nid body] (first (d/q '[:find ?n ?b :in $ ?t :where [?n :note/title ?t] [(get-else $ ?n :note/body "EMPTY") ?b]] db note))
                                                    prompt (format pr/note note body #_summarization conv)
-                                                   new-body (<? S (reasoner-llm prompt))]
+                                                   new-body (<? S (cheap-llm prompt))]
                                              :when (not (.contains new-body "SKIP"))
                                              :let [new-refs (extract-links new-body)
                                                    ref-ids (mapv first (d/q '[:find ?n
@@ -505,7 +505,7 @@
                                                          conv
                                                          (str (java.util.Date.)))
                                    _ (debug "prompt" assist-prompt)
-                                   reply (<? S (reasoner-llm assist-prompt))
+                                   reply (<? S (cheap-llm assist-prompt))
                                    _ (debug "reply" reply)
 
                                ;; 5. dispatch
