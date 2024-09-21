@@ -17,7 +17,9 @@
 (def create (py.- (py.- (py.- client chat) completions) create))
 
 (def window-sizes {"gpt-3.5-turbo-0125" 16384
-                   "gpt-4-turbo" 128000})
+                   "gpt-4-turbo" 128000
+                   "gpt-4o" 128000
+                   "gpt-4o-mini" 128000 })
 
 (defn chat [model text]
   (if (>= (count text) (* 4 (window-sizes model)))

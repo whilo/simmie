@@ -13,7 +13,10 @@
         etaoin/etaoin {:mvn/version "1.0.40"}
         missionary/missionary {:mvn/version "b.34"}
         nrepl/nrepl {:mvn/version "1.1.1"}
-        cider/cider-nrepl {:mvn/version,"0.47.1"}}
+        cider/cider-nrepl {:mvn/version,"0.47.1"}
+        pangloss/pattern {:git/url "https://github.com/pangloss/pattern"
+                          :sha "affc7f3ac907f5b98de6638574a741e4693f1648"}
+        anglican/anglican {:mvn/version "1.1.0"}}
  :jvm-opts ["-Xmx1g"]
  :aliases
  {:run {:main-opts ["-m" "ie.simm.simmie" "--middleware" "[cider.nrepl/cider-middleware]"]}
