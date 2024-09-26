@@ -25,6 +25,8 @@
 (comment
   (youtube-transcript "20TAkcy3aBY")
 
+  (youtube-transcript "wkH1dpr-p_4")
+
   )
 
 (defn extract-url [S text chat]

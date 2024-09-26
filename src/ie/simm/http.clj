@@ -1,5 +1,6 @@
 (ns ie.simm.http
   (:require [muuntaja.core :as m]
+            [hiccup.page :as hp]
             [reitit.ring :as ring]
             [reitit.coercion.spec]
             [reitit.ring.coercion :as rrc]
@@ -13,7 +14,6 @@
 
 (defn ring-handler [routes]
   (let [routes (concat (vec (apply concat (vals routes))) (website-routes))]
-    (prn "ROUTES" routes)
     (ring/ring-handler
      (ring/router
       routes
@@ -26,3 +26,7 @@
      (ring/routes
       (ring/create-resource-handler {:path "/"})
       (ring/create-default-handler)))))
+
+(defn response [body & [status]]
+  {:status (or status 200)
+   :body (str (hp/html5 body))})

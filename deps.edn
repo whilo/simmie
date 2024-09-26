@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
-        io.replikativ/datahike {:mvn/version "0.6.1576"}
+        io.replikativ/datahike {:mvn/version "0.6.1584"}
         clj-python/libpython-clj {:mvn/version "2.025"}
         morse/morse {:mvn/version "0.4.3"}
         io.replikativ/kabel {:mvn/version "0.2.2"}
@@ -11,8 +11,10 @@
         org.clj-commons/hickory {:mvn/version "0.7.4"}
         ring/ring-jetty-adapter {:mvn/version "1.12.0"}
         etaoin/etaoin {:mvn/version "1.1.41"}
+        pdfboxing/pdfboxing {:mvn/version "0.1.14"}
+        remus/remus {:mvn/version "0.2.4"}
         nrepl/nrepl {:mvn/version "1.1.1"}
-        cider/cider-nrepl {:mvn/version,"0.47.1"}
+        cider/cider-nrepl {:mvn/version "0.47.1"}
 
         ;; exploratory
         missionary/missionary {:mvn/version "b.34"}

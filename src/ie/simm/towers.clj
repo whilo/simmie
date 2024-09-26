@@ -3,6 +3,7 @@
             [ie.simm.runtimes.openai :refer [openai]]
             [ie.simm.runtimes.report :refer [report]]
             [ie.simm.runtimes.etaoin :refer [etaoin]]
+            [ie.simm.runtimes.notes :refer [notes]]
             [ie.simm.runtimes.telegram :refer [telegram long-polling]]
             [ie.simm.runtimes.text-extractor :refer [text-extractor]]
             [ie.simm.runtimes.assistance :refer [assistance]]
@@ -18,7 +19,7 @@
   [S peer [in out]])
 
 (defn default []
-  (comp drain brave etaoin openai assistance text-extractor telegram codrain))
+  (comp drain brave etaoin openai notes assistance text-extractor telegram codrain))
 
 (defn debug [] 
   (comp drain 
@@ -29,6 +30,8 @@
         (partial report #(println "etaoin: " (:type %) (:request-id %)))
         openai
         (partial report #(println "openai: " (:type %) (:request-id %)))
+        notes
+        (partial report #(println "notes: " (:type %) (:request-id %)))
         assistance
         (partial report #(println "assistance: " (:type %) (:request-id %)))
         text-extractor
@@ -46,6 +49,8 @@
          (partial report #(println "etaoin: " (:type %) (:request-id %)))
          openai
          (partial report #(println "openai: " (:type %) (:request-id %)))
+         notes
+         (partial report #(println "notes: " (:type %) (:request-id %)))
          assistance
          (partial report #(println "assistance: " (:type %) (:request-id %)))
          text-extractor

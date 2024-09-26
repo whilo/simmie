@@ -20,7 +20,9 @@
                    "gpt-4-turbo" 128000
                    "gpt-4o" 128000
                    "gpt-4o-2024-08-06" 128000
-                   "gpt-4o-mini" 128000 })
+                   "gpt-4o-mini" 128000 
+                   "o1-preview" 128000
+                   "o1-mini" 128000 })
 
 (defn chat [model text]
   (if (>= (count text) (* 4 (window-sizes model)))

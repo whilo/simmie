@@ -6,10 +6,11 @@
             [ring.adapter.jetty :refer [run-jetty]]
             [clojure.core.async :refer [chan close!]]
             [ie.simm.towers :refer [default debug test-tower]]
-            [nrepl.server :refer [start-server stop-server]])
+            [nrepl.server :refer [start-server stop-server]]
+            [cider.nrepl :refer [cider-nrepl-handler]])
   (:gen-class))
 
-(defonce nrepl-server (start-server :port 37888))
+(defonce nrepl-server (start-server :port 37888 :handler cider-nrepl-handler))
 
 (log/merge-config!
   {:appenders {:spit (appenders/spit-appender {:fname "server.log"})}})

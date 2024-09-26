@@ -6,198 +6,20 @@
             [ie.simm.languages.gen-ai :refer [cheap-llm cheap-llm stt-basic image-gen]]
             [ie.simm.languages.web-search :refer [search]]
             [ie.simm.languages.browser :refer [extract-body]]
+            [ie.simm.languages.notes :refer [related-notes]]
             [ie.simm.languages.chat :refer [send-text! send-photo! send-document!]]
             [ie.simm.prompts :as pr]
             [ie.simm.db :refer [ensure-conn conversation extract-links msg->txs window-size]]
+            [ie.simm.peer :as peer]
+            [ie.simm.http :refer [response]]
+            [ie.simm.website :refer [md-render default-chrome base-url]]
+            [ie.simm.runtimes.notes :refer [zip-notes]] ;; TODO move
             [superv.async :refer [<?? go-try S go-loop-try <? >? put? go-for] :as sasync]
             [clojure.core.async :refer [chan pub sub mult tap timeout] :as async]
             [taoensso.timbre :refer [debug info warn error]]
             [datahike.api :as d]
             [hasch.core :refer [uuid]]
-            [clojure.string :as str]
-            [clojure.java.io :as io]
-            [hiccup2.core :as h]
-            [hiccup.page :as hp]
-            [hickory.core :as hk]
-            [nextjournal.markdown :as md]
-            [nextjournal.markdown.transform :as md.transform]
-            [nextjournal.markdown.parser :as md.parser]
-            [clojure.test :as ct])
-  (:import [java.util.zip ZipEntry ZipOutputStream]))
-
-(def ^:const summarization-interval 60000)
-
-(defn summarize [S peer new-msg-chan]
-  (go-loop-try S [{:keys [msg] {:keys [chat from text]} :msg} (<? S new-msg-chan)]
-               (when msg
-                 ;; poll from channel until empty
-                 (while (async/poll! new-msg-chan))
-                 (debug "=========================== SUMMARIZING ===============================")
-                 (let [conn (ensure-conn peer (:id chat))
-                       conv (conversation @conn (:id chat) window-size)
-                       db @conn
-                       summarization  (<? S (cheap-llm (format pr/summarization conv)))
-                       messages (->> (d/q '[:find ?d ?e
-                                            :in $ ?chat
-                                            :where
-                                            [?c :chat/id ?chat]
-                                            [?e :message/chat ?c]
-                                            [?e :message/date ?d]]
-                                          db (:id chat))
-                                     (sort-by first)
-                                     (take-last window-size)
-                                     (map second))
-                       note-titles (extract-links summarization)
-                       _ (debug "=========================== CREATING NOTES ===============================")
-                       new-notes
-                       (<? S (async/into []
-                                         (go-for S [[i note] (partition 2 (interleave (iterate inc 2) note-titles))
-                                                    :let [[nid body] (first (d/q '[:find ?n ?b :in $ ?t :where [?n :note/title ?t] [(get-else $ ?n :note/body "EMPTY") ?b]] db note))
-                                                          prompt (format pr/note note body #_summarization conv)
-                                                          new-body (<? S (cheap-llm prompt))]
-                                                    :when (not (.contains new-body "SKIP"))
-                                                    :let [new-refs (extract-links new-body)
-                                                          ref-ids (mapv first (d/q '[:find ?n
-                                                                                     :in $ [?t ...]
-                                                                                     :where
-                                                                                     [?n :note/title ?t]]
-                                                                                   db new-refs))]]
-                                                 {:db/id (or nid (- i))
-                                                  :note/title note
-                                                  :note/body new-body
-                                                  :note/link ref-ids
-                                                  :note/summary -1})))]
-                   (debug "=========================== STORING NOTES ===============================")
-                   (debug "Summarization:" summarization)
-                   (debug "summarization links" (extract-links summarization))
-                   (d/transact conn (concat
-                                     [{:db/id -1
-                                       :conversation/summary summarization
-                                       :conversation/date (java.util.Date.)
-                                       :conversation/message messages}]
-                                     new-notes))
-                              ;; keep exports up to date
-                   (doseq [[t b] (map (fn [{:keys [note/title note/body]}] [title body]) new-notes)]
-                     (debug "writing note" t)
-              ;; write to org file in chats/chat-id/title.org
-                     (let [f (io/file (str "chats/" (:id chat) "/" t ".md"))]
-                       (io/make-parents f)
-                       (with-open [w (io/writer f)]
-                         (binding [*out* w]
-                           (println b)))))
-                   (extract-links summarization))
-                 (<? S (timeout summarization-interval))
-                 (recur (<? S new-msg-chan)))))
-
-(defn zip-notes [chat-id]
-  (let [zip-file (io/file (str "chats/" chat-id ".zip"))
-        zip-out (io/output-stream zip-file)
-        zip (ZipOutputStream. zip-out)
-        notes-dir (io/file (str "chats/" chat-id))
-        _ (io/make-parents notes-dir)
-        _ (io/make-parents zip-file)
-        _ (doseq [f (rest (file-seq notes-dir))]
-            (let [entry (ZipEntry. (str chat-id "/" (.getName f)))]
-              (.putNextEntry zip entry)
-              (with-open [in (io/input-stream f)]
-                (io/copy in zip))
-              (.closeEntry zip)))]
-    (.close zip)
-    (.close zip-out)
-    zip-file))
-
-(def base-url "https://ec2-52-32-225-23.us-west-2.compute.amazonaws.com")
-
-(def internal-link-tokenizer
-  (md.parser/normalize-tokenizer
-   {:regex #"\[\[([^\]]+)\](\[([^\]]+)\])?\]"
-    :handler (fn [match] {:type :internal-link
-                          :text (match 1)})}))
-
-
-(def md-renderer
-  (assoc md.transform/default-hiccup-renderers
-        ;; :doc specify a custom container for the whole doc
-         :doc (partial md.transform/into-markup [:div.viewer-markdown])
-
-        ;; :text is funkier when it's zinc toned 
-        ;; :text (fn [_ctx node] [:span #_{:style {:color "#71717a"}} (:text node)])
-        ;; :plain fragments might be nice, but paragraphs help when no reagent is at hand
-         :plain (partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
-
-         :formula (fn [ctx {:keys [text content]}] (str "$$" text "$$"))
-         #_(partial md.transform/into-markup [:p #_{:style {:margin-top "-1.2rem"}}])
-
-         :block-formula (fn [ctx {:keys [text content]}] (str "$$" text "$$"))
-         ;:link (fn [ctx {:as node :keys [attrs]}] (md.transform/into-markup [:a {:href (:href attrs)}] ctx node))
-        ;; :ruler gets to be funky, too
-        ; :ruler (constantly [:hr {:style {:border "2px dashed #71717a"}} ])
-         ))
-
-(defn md-render [s]
-  (md.transform/->hiccup
-   md-renderer
-   (md/parse (update md.parser/empty-doc :text-tokenizers concat [internal-link-tokenizer md.parser/hashtag-tokenizer])
-             s)))
-
-(defn response [body & [status]]
-  {:status (or status 200)
-   :body (str (hp/html5 body))}) 
-
-(defn default-chrome [title & body]
-  [:html
-   [:head
-    [:meta {:charset "utf-8"}]
-    [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
-    [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" :integrity "sha384-wcIxkf4k558AjM3Yz3BBFQUbk/zgIYC2R0QpeeYb+TwlBVMrlgLqwRjRtGZiK7ww" :crossorigin "anonymous"}]
-    [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" :integrity "sha384-hIoBPJpTUs74ddyc4bFZSM1TVlQDA60VBbJS0oA934VSz82sBx1X7kSx2ATBDIyd" :crossorigin "anonymous"}]
-    [:script {:defer true :src "https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js" :integrity "sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" :crossorigin "anonymous"
-              :onload "renderMathInElement(document.body);"}]
-    [:link {:rel "stylesheet" :href "https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css"}]
-    [:link {:rel "stylesheet" :href "https://cdn.jsdelivr.net/npm/bulma@1.0.0/css/bulma.min.css"}]
-    [:script {:src "https://unpkg.com/htmx.org@1.9.11" :defer true}]
-    [:script {:src "https://unpkg.com/hyperscript.org@0.9.12" :defer true}]
-   
-    [:title title]]
-   [:body
-    [:section {:class "hero is-fullheight"}
-     [:div {:class "hero-head"}
-      [:header {:class "navbar"}
-       [:div {:class "container"}
-        [:div {:class "navbar-brand"}
-         [:a {:class "navbar-item" :href "/"}
-          [:img {:src "/simmie.png" :alt "Simmie logo"}]]
-         [:span {:class "navbar-burger" :data-target "navbarMenu"}
-          [:span]
-          [:span]
-          [:span]]]
-        [:div {:id "navbarMenu" :class "navbar-menu"}
-         [:div {:class "navbar-start"}
-          [:a {:class "navbar-item" :href "#"} "Home"]
-          [:a {:class "navbar-item" :href "#"} "Features"]
-          [:a {:class "navbar-item" :href "#"} "About"]]]]]]
-     (vec (concat [:div {:class "hero-body"}] body))
-     [:div {:class "hero-foot"}
-      [:footer {:class "footer"}
-       [:div {:class "content has-text-centered"}
-        [:p "Copyright © 2024 Christian Weilbach. All rights reserved."]]]]]]])
-
-
-(defn render-supertag [tag schema]
-  [:div.content
-   tag
-   [:ul
-    (->> schema
-         (filter (fn [[k _v]] (let [ns (str (namespace k))] (= ns "issue"))))
-         (map (fn [[k v]]
-                [:li [:span.container
-                [:span.content
-                      (name k)
-                      (case (:db/valueType v)
-                        :db.type/string [:input.input {:type "text" :name (name k)}]
-                        :db.type/long [:input.input {:type "text" :name (name k)}]
-                        :db.type/instant [:input.input {:type "text" :name (name k)}]
-                        "unknown")]]])))]])
+            [clojure.string :as str]))
 
 (defn chat-overview [peer {{:keys [chat-id]} :path-params}]
   (let [conn (ensure-conn peer chat-id)
@@ -215,69 +37,6 @@
           [:a {:href (str "/chats/" chat-id)}
            [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]]
            [:span title]]]]]
-       [:div.content "The following points describes how to break down what you want into actionable and quantifiable steps that can potentially be automated by agents."]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "goals"}
-         [:a {:class "" :href "goals"} [:i {:class "bx bx-target-lock"}]]
-         [:span {:class ""} "Goals"]]
-        [:div.content
-         [:p "Goals describe what you generally try to achieve in this process."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "Provide a simple and efficient way to keep track of important information and conversations."]
-          [:li "Designed to be easy to use and to help you stay organized."]
-          [:li "Able to learn from your interactions and improve over time."]]]]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "issues"}
-         [:a {:class "" :href "issues"} [:i {:class "bx bx-check-square"}]]
-         [:span {:class ""} "Issues"]]
-        [:div {:class "content"}
-         [:p "Here you list all issues, problems, general situations or detailed scenarios where one or more of the goals are not met. If possible describe the value that solving each issue would provide to the system."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "Only Telegram is supported, considered Slack, Discord, Whatsapp(?). Value: Slack opens business clients. Value: More potential users."]
-          [:li "Automatically infer and update this process description from context with conversational AI. Value: More users if system makes sense and is accepted."]
-          [:li "Intelligently select context from memory to learn over time. Value: More accurate, relevant and personalized responses."]]]]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "startegies"}
-         [:a {:class "" :href "strategies"} [:i {:class "bx bx-map-alt"}]]
-         [:span {:class ""} "Strategy"]]
-        [:div {:class "content"}
-         [:p "Here you list strategies that can be used to achieve the goals. They are general approaches that can be taken to solve the issues and achieve the goals. They help to derive actions that can be taken to solve the issues and achieve the goals."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "Implement general htmx UI components for Datahike schema."]]]]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "startegies"}
-         [:a {:class "" :href "strategies"} [:i {:class "bx bx-joystick-button"}]]
-         [:span {:class ""} "Actions"]]
-        [:div {:class "content"}
-         [:p "Here you list actions that can be taken to achieve the goals. They are specific steps that can be taken to solve the issues and achieve the goals."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "Use a simple note-taking system to keep track of important information and conversations."]]]]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "progress-metrics"}
-         [:a {:class "" :href "progress-metrics"} [:i {:class "bx bx-up-arrow-circle"}]]
-         [:span {:class ""} "Progress metrics"]]
-        [:div {:class "content"}
-         [:p "Define progress metrics that measure how well each issue is being adressed. Typically they are quantifiable and can be measured over time, e.g. daily, weekly and monthly. Where possible they should quantify how much value is provided for solving each issue. For example if a goal is to increase the number of users, a progress metric could be the number of new users per day. For the monthly revenue the number of daily users could be a progress metric, but a translation factor needs to be defined."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "New users/day."]
-          [:li "Company revenue/month."]]]]
-       [:div {:class "container"}
-        [:h2 {:class "title is-2 is-spaced" :id "resources"}
-         [:a {:class "" :href "resources"} [:i {:class "bx bx-dollar-circle"}]]
-         [:span {:class ""} "Resources"]]
-        [:div {:class "content"}
-         [:p "These are resources you have availble to tackle the issues and achieve the goals. They can be people, tools, data, or anything else that can help you."]]
-        [:div {:class "content"}
-         [:ul
-          [:li "Telegram chat."]
-          [:li "Datahike database."]
-          [:li "1000 USD"]
-          [:li "100 hours"]]]]
        [:div {:class "container"}
         [:h2 {:class "title is-2 is-spaced" :id "bots"}
          [:a {:class "" :href "bots"} [:i {:class "bx bx-bot"}]]
@@ -321,113 +80,6 @@
                  (map (fn [f] [:li [:a {:href (str "/chats/" chat-id "/issues/" f)} f]]) issues)]
                 "No issues."))]]]]]]))))
 
-(defn view-note [peer {{:keys [chat-id note]} :path-params}]
-  (let [conn (ensure-conn peer chat-id)
-        body (:note/body (d/entity @conn [:note/title note]))
-        chat-title (:chat/title (d/entity @conn [:chat/id (Long/parseLong chat-id)]))
-        summaries (->>
-                   (d/q '[:find ?s ?d ?t ?n ?f ?l
-                          :in $ ?note
-                          :where
-                          [?n :note/title ?note]
-                          [?n :note/summary ?c]
-                          [?c :conversation/summary ?s]
-                          [?c :conversation/message ?m]
-                          [?m :message/date ?d]
-                          [?m :message/text ?t]
-                          [?m :message/from ?u]
-                          [(get-else $ ?u :from/username "") ?n]
-                          [(get-else $ ?u :from/first_name "") ?f]
-                          [(get-else $ ?u :from/last_name "") ?l]]
-                        @conn note)
-                   (reduce (fn [m [s d t n f l]]
-                             (update m s (fnil conj []) [d t n f l]))
-                           {}))
-        linking-notes (d/q '[:find ?lt
-                             :in $ ?t
-                             :where
-                             [?n :note/title ?t]
-                             [?l :note/link ?n]
-                             [?l :note/title ?lt]]
-                           @conn note)]
-    (response
-     (default-chrome note
-      [:div {:class "container"}
-       [:nav {:class "breadcrumb" :aria-label "breadcrumbs"}
-        [:ul {} #_[:li [:p "Process"]]
-         [:li [:span #_{:href "/#"} [:span {:class "icon is-small"} [:i {:class "bx bx-circle"}]] [:span "Systems"]]]
-         [:li [:a {:href (str "/chats/" chat-id)} [:span {:class "icon is-small"} [:i {:class "bx bx-chat"}]] [:span (or chat-title "Noname chat")]]]
-         [:li.is-active [:a {:href (str "/chats/" chat-id "/notes/" note)} [:span {:class "icon is-small"} [:i {:class "bx bx-note"}]] [:span note]]]]]
-       [:article {:id "note" :class "message"}
-        [:div {:class "message-header"}
-         [:p note]
-         [:button {:class "delete" :hx-post (str "/chats/" chat-id "/notes/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-confirm "Are you sure you want to delete this note?" :hx-swap "outerHTML"}]]
-        [:div {:class "message-body content"}
-         (if body (md-render body) "Note does not exist yet.")
-         [:button {:class "button is-primary" :hx-post (str "/chats/" chat-id "/notes/" note "/edit") :hx-target "#note" :hx-trigger "click" :hx-swap "outerHTML"} "Edit"]]]
-       (when (seq linking-notes)
-         [:div {:class "content"}
-          [:h4 {:class "title is-4 is-spaced" :id "incoming-pointers"}
-           [:a {:class "" :href "incoming-pointers"} "# "]
-           [:span {:class ""} "Pointing to this note"]]
-          (for [[ln] linking-notes]
-            [:div {:class "content"}
-             [:a {:href (str "/chats/" chat-id "/notes/" ln)} ln]])])
-       (when (seq summaries)
-         [:div {:class "content"}
-          (for [[i [s ds]] (map (fn [i s] [i s]) (rest (range)) summaries)]
-            [:div {:class "content"}
-             [:div.content
-              [:h4 {:class "title is-4 is-spaced" :id (str i "-source")}
-               [:a {:class "" :href (str "#" i "-source")} "# "]
-               [:span {:class ""} (str i ". Conversation")]]
-              (md-render s)]
-             [:div.content
-              [:h5 {:class "title is-5 is-spaced" :id (str i "-message-history")}
-               [:a {:class "" :href (str "#" i "-message-history")} "# "]
-               [:span {:class ""}  "Messages"]]
-              [:ul (for [[d t n f l] (sort-by first ds)]
-                     [:li [:div {:class "content"}
-                           [:h6 (md-render (str "Message from [[" f " " l "]] (" n ") on " d))]
-                           (md-render t)]])]]])])]))))
-
-(defn edit-note [peer {{:keys [chat-id note]} :path-params}]
-  (let [conn (ensure-conn peer chat-id)
-        body (:note/body (d/entity @conn [:note/title note]))
-        edit? (get-in (swap! peer update-in [:transient chat-id note :edit] not) [:transient chat-id note :edit] false)]
-    (response
-     [:article {:id "note" :class "message"}
-      [:div {:class "message-header"}
-       [:p note]
-       [:button {:class "delete" :hx-post (str "/chats/" chat-id "/notes/" note "/delete") :hx-trigger "click" :hx-target "#note" :hx-swap "outerHTML" :hx-confirm "Are you sure you want to delete this note?"}]]
-      [:div {:class "message-body content"}
-       (if edit?
-         [:textarea {:class "textarea" :rows 20 :name "note" :hx-post (str "/chats/" chat-id "/notes/" note "/edited") :hx-trigger "keyup changed delay:500ms"} body]
-         (if body (md-render body) "Note does not exist yet."))
-       [:button {:class "button is-primary" :hx-post (str "/chats/" chat-id "/notes/" note "/edit") :hx-target "#note" :hx-swap "outerHTML" :hx-trigger "click"} "Edit"]]])))
-
-(defn edited-note [peer {{:keys [chat-id note]} :path-params
-                         :keys [params]}]
-  (let [conn (ensure-conn peer chat-id)
-        id (or (:db/id (d/entity @conn [:note/title note])) (d/tempid :db.part/user))
-        new-body (get params "note")
-        links (extract-links new-body)]
-    (d/transact conn [(merge
-                       {:db/id id
-                        :note/title note
-                        :note/body new-body}
-                       (when (seq links)
-                         {:note/link (mapv first (d/q '[:find ?n :in $ [?t ...] :where [?n :note/title ?t]] @conn links))}))])
-    {:status 200
-     :body "Success."}))
-
-(defn delete-note [peer {{:keys [chat-id note]} :path-params
-                         :keys [params]}]
-  (let [conn (ensure-conn peer chat-id)]
-    (debug "Deleted note entity" (d/transact conn [[:db/retractEntity [:note/title note]]]))
-    (response [:div {:id "note" :class "notification"}
-               "Note does not exist yet."])))
-
 (defn assistance
   "This interpreter can derive facts and effects through a relational database."
   [[S peer [in out]]]
@@ -452,28 +104,17 @@
         _ (tap mo pub-out)
         po (pub pub-out :type)
 
-        ;; summarization channel
-        new-msg-chan (chan 1000)
-        _ (sub pi :ie.simm.runtimes.telegram/message new-msg-chan)
-
         ;; TODO figure out prefix, here conflict if chats/
-        routes [["/download/chat/:chat-id/notes.zip" {:get (fn [{{:keys [chat-id]} :path-params}] {:status 200 :body (zip-notes chat-id)})}]
-                ["/chats/:chat-id" {:get (partial #'chat-overview peer)}]
-                ["/chats/:chat-id/notes/:note" {:get (partial #'view-note peer)}]
-                ["/chats/:chat-id/notes/:note/edit" {:post (partial #'edit-note peer)}]
-                ["/chats/:chat-id/notes/:note/edited" {:post (partial #'edited-note peer)}]
-                ["/chats/:chat-id/notes/:note/delete" {:post (partial #'delete-note peer)}]]]
-    (swap! peer assoc-in [:http :routes :assistance] routes)
+        routes [["/chats/:chat-id" {:get (partial #'chat-overview peer)}]]]
+    (peer/add-routes! peer :assistance routes)
     ;; we will continuously interpret the messages
     (binding [lb/*chans* [next-in pi out po]]
-      (summarize S peer new-msg-chan)
       (go-loop-try S [m (<? S msg-ch)]
                    (when m
                      (let [{:keys [msg]
                             {:keys [chat from text]} :msg} m]
                        (try
                          (let [_ (debug "received message" m)
-                               firstname (:first_name from)
                                start-time-ms (System/currentTimeMillis)
 
                                conn (ensure-conn peer (:id chat))
@@ -491,25 +132,11 @@
                                                 [?m :message/chat ?c]
                                                 [?c :chat/id ?cid]]
                                               @conn (:id chat))
-                               _ (debug "message count" msg-count)
-                               #_(when (<= (mod msg-count window-size) 1)
-                                   (summarize S conn conv chat))]
-
+                               _ (debug "message count" msg-count)]
                            (when (or (= (:type chat) "private")
                                      (.contains text "@simmie"))
                              (let [;; 3. retrieve summaries for active links
-                                   all-links (d/q '[:find [?t ...] :where [_ :conversation/link ?t]] @conn)
-                                   relevant (<? S (cheap-llm (format "You are given the following links in Wikipedia style brackets [[some entity]]:\n\n%s\n\nList the most relevant links for the following conversation with descending priority.\n\n%s"
-                                                                     (str/join ", " (map #(str "[[" % "]]") all-links))
-                                                                     conv)))
-                                   active-links (concat (take 3 (extract-links relevant)) [firstname])
-
-                                   summaries (d/q '[:find ?t ?s
-                                                    :in $ [?t ...]
-                                                    :where
-                                                    [?c :note/title ?t]
-                                                    [?c :note/body ?s]]
-                                                  @conn (concat active-links (extract-links conv)))
+                                   {:keys [active-links summaries]} (<? S (related-notes conn conv))
                                    _ (debug "active links" #_summaries active-links)
 
                           ;; 4. derive reply
