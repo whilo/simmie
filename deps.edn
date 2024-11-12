@@ -1,6 +1,6 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.11.1"}
-        io.replikativ/datahike {:mvn/version "0.6.1584"}
+        io.replikativ/datahike {:mvn/version "0.6.1592"}
         clj-python/libpython-clj {:mvn/version "2.025"}
         morse/morse {:mvn/version "0.4.3"}
         io.replikativ/kabel {:mvn/version "0.2.2"}
@@ -18,12 +18,14 @@
 
         ;; exploratory
         missionary/missionary {:mvn/version "b.34"}
+        io.github.jbellis/jvector {:mvn/version "3.0.2"}
         pangloss/pattern {:git/url "https://github.com/pangloss/pattern"
-                          :sha "affc7f3ac907f5b98de6638574a741e4693f1648"}
+                          :sha #_"affc7f3ac907f5b98de6638574a741e4693f1648"
+                          "93fb43e3223bbcfe08c4e37414709021d8a99604"}
         anglican/anglican {:mvn/version "1.1.0"}}
- :jvm-opts ["-Xmx1g"]
+ :jvm-opts ["-Xmx1g" "--add-modules jdk.incubator.vector"]
  :aliases
- {:run {:main-opts ["-m" "ie.simm.simmie" "--middleware" "[cider.nrepl/cider-middleware]"]}
+ {:run {:main-opts ["-m" "is.simm.simmis" "--middleware" "[cider.nrepl/cider-middleware]"]}
   :build {:deps {io.github.clojure/tools.build
                  {:mvn/version "0.9.6"}}
           :ns-default build}

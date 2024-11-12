@@ -2,9 +2,9 @@
   (:refer-clojure :exclude [test])
   (:require [clojure.tools.build.api :as b]))
 
-(def lib 'ie.simm/simmie)
+(def lib 'is.simm/simmie)
 (def version "0.1.0-SNAPSHOT")
-(def main 'ie.simm.simmie)
+(def main 'is.simm.simmie)
 (def class-dir "target/classes")
 
 (defn test "Run all the tests." [opts]

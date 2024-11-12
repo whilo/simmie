@@ -34,3 +34,4 @@ downloads/
 .clj-kondo/
 resources/config.edn
 *.log
+files
